@@ -1,105 +1,223 @@
-# Orbis hackathon starter!
+# Orbis Arcade
 
-A minimal Next.js example for the public Reactor-hosted Visko Orbis Stable API.
-It demonstrates server-side token minting, WebRTC video and audio, text-to-video,
-optional image-to-video, live prompt steering, delivery resolution, pause,
-resume, and a foldable Nano Banana-to-Orbis livestreaming example.
+Drop in any image and play it. A Next.js app for the Reactor-hosted Visko Orbis
+Stable API that turns a still image into a live, controllable world: WASD moves
+the camera, the mouse aims, and clicks act on whatever is under the crosshair.
+
+There is no prompt box. Input is encoded into steering prompts for you.
 
 ## Requirements
 
 - Node.js 20.9 or newer
 - A Reactor API key with access to Visko Orbis Stable
-- A Google Gemini API key with access to Nano Banana
+- An OpenAI **or** Google Gemini API key — see *The AI layers* below
 
 ## Run locally
 
 ```bash
 cp .env.example .env.local
-# Add your Reactor API key to .env.local.
+# Add your keys to .env.local.
 npm install
 npm run dev
 ```
 
 Open <http://localhost:3000>.
 
-Set both keys in `.env.local`:
-
 ```dotenv
 REACTOR_API_KEY=your_reactor_api_key
-GEMINI_API_KEY=your_gemini_api_key
+OPENAI_API_KEY=your_openai_api_key   # or GEMINI_API_KEY
 ```
 
-Keep both keys server-side. The browser receives only the short-lived Reactor
-JWT and the image returned by the Nano Banana route.
+Both keys stay server-side. The browser only ever receives the short-lived
+Reactor JWT and the generated world text.
 
-## Nano Banana kickoff example
+## Controls
 
-Connect to Orbis, expand **Livestreaming example**, and click
-**Edit and start stream**. The bundled `dog.png` is displayed as the source
-image. The server sends it with the displayed image-editing prompt to
-`gemini-2.5-flash-image`. Gemini then analyzes the edited image with the user
-prompt and returns a plain-text, image-grounded prompt. The
-edited output is previewed, uploaded as the Orbis start image, and used with
-that grounded prompt to begin the stream.
+| Input | Action |
+| --- | --- |
+| `W` / `S` | Push the camera forward / pull back |
+| `A` / `D` | Slide left / right |
+| `Q` / `E` | Turn the view left / right |
+| `Space` / `C` | Rise / descend |
+| `Shift` | Move quickly |
+| Mouse move | Aim — the scene holds attention where you point |
+| Left click | Act — whatever is there reacts and moves |
+| Right click | Calm — that element recedes or settles |
+| `P` / `M` / `Esc` | Pause · sound · exit world |
 
-The two starting prompts are exported from `lib/nano-banana.ts`.
-`NANO_BANANA_PROMPT` controls the image edit, while `ORBIS_KICKOFF_PROMPT`
-describes the requested motion. The final Gemini-grounded prompt is displayed
-before it is sent to Orbis.
+## How input becomes video
+
+Orbis has no gamepad input. Its only control surface is `set_prompt`, applied at
+the next chunk boundary. Generic camera language ("the camera pushes forward")
+gives the video model nothing to grab onto, so **an AI director writes the
+prompts** — grounded in your specific image.
+
+A Gemini call takes 1-3s and chunk boundaries are ~1.8s apart, so a synchronous
+call per chunk is impossible. Two layers solve that:
+
+**1. The lexicon** (`/api/lexicon`, one call when the image loads). Gemini looks
+at the image and writes how each control reads *in this scene*. Not "the camera
+moves forward" but "the camera pushes between the mossy trunks, ferns brushing
+the lens". Composing a prompt from the lexicon is instant, so every boundary
+always has something grounded to send.
+
+**2. The director** (`/api/direct`, async, per input combination). Input state
+is reduced to a signature — held keys, aim bucketed to a 3x3 zone, last click.
+The first time you hold forward-left you get the composed prompt; the director
+is asked for a bespoke one in the background and cached against that signature,
+so every later boundary with the same input gets Gemini's. Players hold inputs
+for seconds at a time, so the cache warms almost immediately and **never adds
+latency to a boundary**.
+
+The `LAST PROMPT` panel shows `DIRECTED` or `COMPOSED` for which layer produced
+the prompt, plus a `sent/cached` count.
+
+### State is what makes it coherent
+
+Prompts were originally stateless — each chunk independently said "push
+forward", so the model re-interpreted the scene every 1.8s and nothing
+accumulated. `lib/game-camera.ts` fixes that with two pieces of state:
+
+- **Camera pose.** WASD integrates at 10Hz into advance / strafe / elevation /
+  yaw, which is rendered as displacement from the opening view: *"the camera now
+  sits a fair distance deeper into the scene, rotated about 120 degrees to the
+  left"*. Holding W becomes travel instead of a repeated instruction, and the
+  director is told to describe what faces the camera **now**, never to cut back
+  to the opening view.
+- **World memory.** A click appends to a log kept for three chunks. The chunk it
+  lands on fires the interaction; the ones after say *"whatever was disturbed at
+  the centre is still active and has not returned to how it was"*, so effects
+  persist instead of snapping back.
+
+Both feed the cache key, so moving somewhere genuinely new correctly
+invalidates a cached prompt while small drift still reuses it.
+
+Two more structural choices:
+
+- **The action goes first, the world anchor last.** Leading with the world
+  buried the only part that changes between chunks.
+- **A click is never deduped.** Held keys are — re-sending identical text just
+  spends a boundary — but a click is a one-shot event and always goes out.
+
+Orbis emits a chunk about every 1.8s, so that is the real control latency. The
+`NEXT` meter shows time to the next steering opportunity; `QUEUED` means your
+input differs from what was last sent.
+
+## The AI layers
+
+`lib/ai.ts` is provider-agnostic: set `OPENAI_API_KEY` or `GEMINI_API_KEY` and
+the routes use whichever is present (OpenAI wins if both are). Defaults are
+`gpt-5.6-luna` and `gemini-3.5-flash`, overridable via `OPENAI_MODEL` /
+`GEMINI_MODEL`.
+
+When you drop an image, two calls run before you can enter:
+
+1. `POST /api/world` — the model describes the image as a short, stable place
+   (under 70 words, no camera moves, no actions, since the player supplies
+   those). This is the anchor repeated in every prompt to prevent drift, and it
+   stays editable before you enter. ~4s.
+2. `POST /api/lexicon` — the model writes the movement lexicon for that image,
+   as strict-schema JSON. ~8s.
+
+Measured with `gpt-5.6-luna`: world ~4s, lexicon ~8s (both one-time, at image
+load), director ~3-5s (async, never blocking). Note the GPT-5.6 family rejects
+any `temperature` but its default, so the OpenAI path never sends one.
+
+With no key, all three fall back: the world becomes a generic description built
+from the filename, the lexicon becomes generic camera language, and the director
+is skipped entirely rather than burning failed requests. The badges read
+`IMAGE ONLY` and `GENERIC`.
+
+It still runs, but this is exactly the state where inputs feel like they do
+nothing — the prompts have nothing to do with your image. Set the key.
+
+## Interface
+
+The UI is built from two component libraries with a deliberate split:
+
+- **[Neobrutalism](https://neobrutalism.com/)** is the cabinet — topbar,
+  buttons, side panels, badges. Vendored into `components/ui/` from its shadcn
+  registry, so those files are yours to edit.
+- **[Pixel RetroUI](https://retroui.io/)** is the arcade layer inside it — the
+  cartridge-slot world loader, the chunk meter, and the Minecraft font on every
+  HUD readout.
+
+They share one palette (arcade yellow, CRT purple, mint), which is what keeps
+the pairing reading as one machine.
+
+**Layer order matters.** `app/styles.css` opens with
+`@layer theme, base, pixel, components, utilities;` *before* any import. Without
+it the bundler loses Tailwind's own ordering statement, preflight outranks
+utilities, and borders silently collapse to `0px` while `bg-*` stops applying to
+buttons. The declaration also slots Pixel RetroUI between base and components:
+its component look beats preflight, and Tailwind utilities still beat it — which
+is what the library's own docs achieve with a blunt `important: true`.
+
+## Connection notes
+
+`POST /sessions` answers 429 for two unrelated reasons, and both clear on their
+own, so `connectSession` retries with backoff:
+
+- `no available capacity` — Reactor's GPU pool is full.
+- `quota_exceeded` — the account already holds its one allowed concurrent
+  session. Usually a browser tab still connected; closing a tab does not tear
+  the session down cleanly, so prefer **Disconnect**.
 
 ## API flow
 
 1. `POST /api/token` requests a scoped session JWT from
    `https://api.reactor.inc/tokens`.
-2. `ReactorProvider` connects to `reactor/visko-orbis-stable` with the
-   recv-only `main_video` and `main_audio` tracks.
-3. The model sends a `state` snapshot. Its `state.available_resolutions` list
-   replaces the starter's initial documented resolution choices.
-4. If supplied, the reference image is uploaded and passed to `set_image`
-   before `start`.
-5. If selected, `set_resolution` stages a delivery tier for the next `start`.
-   Omitting it keeps the model's current setting; the documented default is
-   `2k`.
-6. `set_prompt` supplies the required prompt, then `start` begins generation.
-7. Sending another `set_prompt` while running steers the video at the next
-   chunk boundary.
+2. `ReactorProvider` connects to `reactor/visko-orbis-stable` with the recv-only
+   `main_video` and `main_audio` tracks.
+3. The model sends a `state` snapshot whose `available_resolutions` replaces the
+   documented defaults.
+4. The world image is uploaded and passed to `set_image` before `start`.
+5. `set_resolution` stages a tier for the next `start`; the documented default
+   is `2k`.
+6. `set_prompt` supplies the world prompt, then `start` begins generation.
+7. From then on the game loop sends `set_prompt` once per chunk boundary.
 
 ## Documented model behavior
 
-- A prompt is required before `start`; the reference image is optional.
-- A 16:9 reference image works best. Other aspect ratios are resized without
-  cropping and may appear distorted.
-- The starter initially shows the currently documented `1080p`, `2k`, and `4k`
-  tiers. After connection, treat `state.available_resolutions` as authoritative
-  and send the selected value exactly as given.
-- `set_resolution` applies from the next `start`, not during the active run.
-- Orbis emits chunks about every 1.8 seconds. The first chunk emits no frames
-  while the upscaler primes; this is expected.
-- Commands are asynchronous. Use model events such as `state`,
-  `prompt_accepted`, `resolution_accepted`, `generation_started`,
-  `chunk_complete`, and `command_error` as the source of truth.
+- A prompt is required before `start`; the reference image is optional, though
+  this app always sends one.
+- A 16:9 reference image works best. Other ratios are resized without cropping
+  and may look distorted.
+- Treat `state.available_resolutions` as authoritative after connecting.
+- `set_resolution` applies from the next `start`, not during a run.
+- The first chunk emits no frames while the upscaler primes. This is expected.
+- Commands are asynchronous. Use `state`, `prompt_accepted`,
+  `generation_started`, `chunk_complete`, and `command_error` as the source of
+  truth.
 - `pause` takes effect after the current chunk. `resume` continues the same
-  generation, and `reset` clears the current prompt and image.
+  generation; `reset` clears the prompt and image.
 
 ## Project files
 
-- `app/api/token/route.ts` performs the server-side token exchange.
-- `app/api/nano-banana/route.ts` performs the server-side image edit.
-- `app/api/orbis-prompt/route.ts` creates the image-grounded video prompt.
-- `components/orbis-demo.tsx` composes the provider, player, controls, and demo.
-- `components/orbis-player.tsx` renders the streamed video and audio.
-- `components/orbis-controls.tsx` renders the session controls.
-- `components/nano-banana-example.tsx` owns the kickoff example and source image.
-- `hooks/use-orbis-session.ts` contains the reusable Orbis command sequence and
-  session state.
-- `dog.png` is the Nano Banana source image.
-- `lib/orbis.ts` contains the public model configuration and message helpers.
-- `lib/orbis-prompt.ts` contains the plain-text Gemini grounding instruction.
-- `lib/nano-banana.ts` contains the model and kickoff prompt.
-- `.env.example` documents the required environment variables.
+- `app/api/token/route.ts` — server-side Reactor token exchange.
+- `app/api/world/route.ts` — turns an uploaded image into a world description.
+- `app/api/lexicon/route.ts` — writes how each control reads in that image.
+- `app/api/direct/route.ts` — bespoke prompt for one input combination.
+- `components/game-shell.tsx` — provider, layout, and global hotkeys.
+- `components/game-viewport.tsx` — video surface, crosshair, ripples, zone grid.
+- `components/game-hud.tsx` — keycaps, action readout, world and event panels.
+- `components/world-loader.tsx` — image intake and world editing.
+- `components/ui/` — vendored Neobrutalism components.
+- `hooks/use-game-input.ts` — keyboard and pointer capture.
+- `hooks/use-game-loop.ts` — chunk-boundary steering loop.
+- `hooks/use-orbis-session.ts` — Orbis command sequence and session state.
+- `lib/game-input.ts` — key bindings, pointer state, spatial vocabulary.
+- `lib/game-director.ts` — lexicon, situation signatures, prompt composition.
+- `lib/game-camera.ts` — camera pose integration and world memory.
+- `lib/game-world.ts` — world grounding prompt and client helper.
+- `lib/ai.ts` — provider-agnostic text and JSON generation (OpenAI / Gemini).
+- `lib/orbis.ts` — model configuration and message helpers.
 
-For the complete command parameters, message schemas, tracks, and current model
-behavior, use the public Reactor documentation:
+`app/api/nano-banana/route.ts`, `app/api/orbis-prompt/route.ts`, their `lib/`
+prompts, and `dog.png` are the original starter's image-editing kickoff demo.
+Nothing in the game UI calls them; they are left in place as working reference.
+
+## Reference
 
 - [Visko Orbis Stable API](https://www.reactor.inc/models/visko-orbis-stable/api)
 - [Visko Orbis Dynamic API](https://www.reactor.inc/models/visko-orbis-dynamic/api)
