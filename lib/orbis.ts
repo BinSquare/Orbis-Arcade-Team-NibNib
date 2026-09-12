@@ -28,6 +28,25 @@ export function unwrapOrbisMessage(raw: unknown): OrbisMessage {
   return raw as OrbisMessage;
 }
 
+/**
+ * Reactor answers `POST /sessions` with 429 for two very different reasons:
+ * the GPU pool is full ("no available capacity"), or the account already holds
+ * its one allowed concurrent session ("quota_exceeded"). Both clear on their
+ * own — capacity when a server frees up, quota when the stale session times
+ * out — so both are worth retrying rather than failing the player outright.
+ */
+export function isRetryableConnectError(caught: unknown): boolean {
+  const message = (
+    caught instanceof Error ? caught.message : String(caught)
+  ).toLowerCase();
+  return (
+    message.includes("429") ||
+    message.includes("no available capacity") ||
+    message.includes("quota_exceeded") ||
+    message.includes("quota exceeded")
+  );
+}
+
 export async function requestReactorJwt() {
   const response = await fetch("/api/token", { method: "POST" });
   const result = (await response.json()) as { jwt?: string; error?: string };

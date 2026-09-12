@@ -1,8 +1,117 @@
+/* Layer order is declared up front, before any import.
+ *
+ * Without this the bundler loses Tailwind's own ordering statement and
+ * preflight (@layer base) ends up outranking utilities — borders collapse to
+ * 0px and `bg-*` silently stops applying to buttons. Declaring it here also
+ * lets us slot Pixel RetroUI between the two: its component look beats
+ * preflight, and our Tailwind utilities still beat it. That is what the
+ * library's own docs achieve with a blunt `important: true`. */
+@layer theme, base, pixel, components, utilities;
+
+@import "tailwindcss";
+@import "pixel-retroui/dist/index.css" layer(pixel);
+@import "pixel-retroui/dist/fonts.css";
+
+/* ==================================================================== */
+/* Two design systems, one machine.                                     */
+/*                                                                      */
+/* Neobrutalism  → the cabinet: topbar, buttons, side panels, badges.   */
+/*                 Hard black borders, offset shadows, Archivo Black.   */
+/* Pixel RetroUI → the arcade layer inside it: the world loader, the    */
+/*                 chunk meter, the Minecraft-font HUD readouts.        */
+/*                                                                      */
+/* They share one palette (arcade yellow + CRT purple + mint), which is */
+/* what keeps the pairing reading as a single machine rather than two.  */
+/* ==================================================================== */
+
+@theme inline {
+  --font-head: var(--font-head);
+  --font-sans: var(--font-sans);
+  --font-pixel: Minecraft, ui-monospace, monospace;
+  --radius: var(--radius);
+
+  --shadow-xs: 1px 1px 0 0 var(--border);
+  --shadow-sm: 2px 2px 0 0 var(--border);
+  --shadow: 3px 3px 0 0 var(--border);
+  --shadow-md: 4px 4px 0 0 var(--border);
+  --shadow-lg: 6px 6px 0 0 var(--border);
+  --shadow-xl: 10px 10px 0 1px var(--border);
+  --shadow-2xl: 16px 16px 0 1px var(--border);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary-hover: var(--secondary-hover);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-mint: var(--mint);
+}
+
 :root {
   color-scheme: dark;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  background: #0a0a0b;
-  color: #f6f4ed;
+
+  /* Neobrutalism tokens, tuned to a dark arcade cabinet. */
+  --radius: 0px;
+  --background: #17141f;
+  --foreground: #f7f3e8;
+  --card: #221d30;
+  --card-foreground: #f7f3e8;
+  --primary: #ffdc58;
+  --primary-hover: #ffd12e;
+  --primary-foreground: #000000;
+  --secondary: #c381b5;
+  --secondary-hover: #d493c6;
+  --secondary-foreground: #000000;
+  --muted: #2b2440;
+  --muted-foreground: #a49cba;
+  --accent: #5fe3d0;
+  --accent-foreground: #000000;
+  --destructive: #ff6b6b;
+  --destructive-foreground: #17141f;
+  --border: #000000;
+  --input: #221d30;
+  --ring: #ffdc58;
+  --mint: #5fe3d0;
+
+  /* Pixel RetroUI theme hooks — the same palette, so the pixel layer and
+     the neobrutalist chrome never look like two different products. */
+  --bg-button: #c381b5;
+  --text-button: #17141f;
+  --border-button: #000000;
+  --shadow-button: #17141f;
+
+  --bg-card: #221d30;
+  --text-card: #f7f3e8;
+  --border-card: #000000;
+  --shadow-card: #c381b5;
+
+  --bg-textarea: #17141f;
+  --text-textarea: #f7f3e8;
+  --border-textarea: #000000;
+
+  --bg-input: #17141f;
+  --text-input: #f7f3e8;
+  --border-input: #000000;
+
+  --color-progressbar: #ffdc58;
+  --border-progressbar: #000000;
+
+  --bg-popup: #221d30;
+  --bg-popup-base: #c381b5;
+  --text-popup: #f7f3e8;
 }
 
 * {
@@ -12,326 +121,202 @@
 body {
   min-height: 100vh;
   margin: 0;
-  background: radial-gradient(circle at 50% 0, #252117, #0a0a0b 42%);
+  color: var(--foreground);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  background-color: var(--background);
+  /* Faint CRT grid so even empty space reads as a screen. */
+  background-image:
+    linear-gradient(#ffffff08 1px, transparent 1px),
+    linear-gradient(90deg, #ffffff08 1px, transparent 1px),
+    radial-gradient(ellipse 100% 70% at 50% -10%, #c381b533, transparent 65%);
+  background-size: 32px 32px, 32px 32px, 100% 100%;
 }
 
-button,
-textarea,
-select,
-input {
-  font: inherit;
+h1,
+h2,
+h3 {
+  font-family: var(--font-head), ui-sans-serif, system-ui, sans-serif;
 }
 
-main {
-  width: min(1440px, calc(100% - 32px));
-  margin: 0 auto;
-  padding: 56px 0;
+/* The pixel font is the in-game voice: HUD readouts, keycaps, telemetry. */
+.font-pixel {
+  font-family: Minecraft, ui-monospace, monospace;
 }
 
-header {
-  max-width: 900px;
-  margin-bottom: 28px;
-}
+/* ==================================================================== */
+/* Game surface — bespoke, because neither library ships a video HUD.   */
+/* ==================================================================== */
 
-h1 {
-  margin: 4px 0 8px;
-  font-size: clamp(2rem, 5vw, 4.4rem);
-  line-height: 1;
-  letter-spacing: -0.05em;
-}
-
-header p {
-  color: #aaa69a;
-  line-height: 1.5;
-}
-
-.eyebrow {
-  color: #e5c978;
-  font-size: 0.75rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-.demo-shell {
-  padding: 18px;
-  border: 1px solid #38352d;
-  border-radius: 18px;
-  background: #111113cc;
-}
-
-.session-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.7fr);
-  gap: 18px;
-}
-
-.player {
+.surface {
   position: relative;
   aspect-ratio: 16 / 9;
+  background:
+    repeating-linear-gradient(0deg, #12101c 0 2px, #0e0c17 2px 4px);
+  outline: none;
   overflow: hidden;
-  background: #000;
-  border-radius: 12px;
 }
 
-.player video {
+.surface-live {
+  /* The crosshair replaces the system cursor once the world is running. */
+  cursor: none;
+}
+
+.surface-live:focus-visible {
+  box-shadow: inset 0 0 0 3px var(--mint);
+}
+
+.surface video {
   width: 100%;
   height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
-.player-placeholder {
-  display: grid;
-  width: 100%;
-  height: 100%;
-  color: #77746b;
-  font-size: 0.85rem;
-  place-items: center;
-}
-
-.status {
+/* The 3x3 grid the spatial prompt language is built on. */
+.zone-grid {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  padding: 5px 9px;
-  color: #aaa;
-  font:
-    12px ui-monospace,
-    monospace;
-  background: #191919cc;
-  border-radius: 999px;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 33.33%, #ffffff1f 33.33% calc(33.33% + 2px), transparent calc(33.33% + 2px)),
+    linear-gradient(90deg, transparent 66.66%, #ffffff1f 66.66% calc(66.66% + 2px), transparent calc(66.66% + 2px)),
+    linear-gradient(0deg, transparent 33.33%, #ffffff1f 33.33% calc(33.33% + 2px), transparent calc(33.33% + 2px)),
+    linear-gradient(0deg, transparent 66.66%, #ffffff1f 66.66% calc(66.66% + 2px), transparent calc(66.66% + 2px));
 }
 
-.status-ready {
-  color: #8ee59d;
+/* Crosshair — square and hard-edged to match the pixel layer. */
+.crosshair {
+  position: absolute;
+  translate: -50% -50%;
+  pointer-events: none;
+  z-index: 3;
 }
 
-.controls {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-fieldset {
-  margin: 0;
-  padding: 12px;
-  border: 1px solid #3b3932;
-  border-radius: 10px;
-}
-
-legend {
-  padding: 0 6px;
-  color: #ded5b8;
-  font-size: 0.82rem;
-}
-
-.hint {
-  margin: 0 0 12px;
-  color: #77746b;
-  font-size: 0.76rem;
-  line-height: 1.4;
-}
-
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  color: #bbb7ab;
-  font-size: 0.82rem;
-}
-
-textarea,
-select,
-input {
-  width: 100%;
-  padding: 10px;
-  color: inherit;
-  background: #171719;
-  border: 1px solid #3b3932;
-  border-radius: 8px;
-}
-
-textarea {
-  min-height: 118px;
-  line-height: 1.45;
-  resize: vertical;
-}
-
-button {
-  padding: 9px 12px;
-  color: #15130e;
-  cursor: pointer;
-  background: #ded5b8;
-  border: 1px solid #ded5b8;
-  border-radius: 8px;
-  transition:
-    filter 100ms ease,
-    transform 100ms ease;
-}
-
-button:active:not(:disabled) {
-  filter: brightness(0.82);
-  transform: translateY(2px);
-}
-
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
-}
-
-.button-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.secondary button {
-  color: #ded5b8;
-  background: transparent;
-  border-color: #4e4a3e;
-}
-
-.two-column {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  align-items: end;
-  gap: 10px;
-}
-
-.selected-image {
-  margin: 10px 0 0;
-  color: #918d82;
-  font-size: 0.76rem;
-  overflow-wrap: anywhere;
-}
-
-.nano-demo {
-  margin-top: 18px;
-  border: 1px solid #3b3932;
-  border-radius: 10px;
-  background: #141416;
-}
-
-.nano-demo summary {
-  padding: 12px;
-  color: #ded5b8;
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-
-.nano-demo[open] summary {
-  border-bottom: 1px solid #3b3932;
-}
-
-.nano-demo-content {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-}
-
-.preset-prompt {
-  padding: 10px;
-  color: #aaa69a;
-  font-size: 0.76rem;
-  line-height: 1.45;
-  background: #0b0b0c;
-  border-radius: 8px;
-}
-
-.preset-prompt strong {
-  color: #ded5b8;
-}
-
-.preset-prompt p {
-  margin: 5px 0 0;
-}
-
-.nano-preview-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.nano-preview {
-  min-width: 0;
-  margin: 0;
-}
-
-.nano-image-frame {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  overflow: hidden;
-  background: #000;
-  border-radius: 8px;
-}
-
-.nano-image-frame img {
+.crosshair-ring {
   display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+  width: 38px;
+  height: 38px;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 3px #000, 4px 4px 0 0 #00000080;
+  animation: breathe 2.4s steps(4, end) infinite;
 }
 
-.nano-output-placeholder {
+.crosshair-dot {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  translate: -50% -50%;
+  width: 6px;
+  height: 6px;
+  background: var(--mint);
+  box-shadow: 0 0 0 2px #000;
+}
+
+.crosshair-label {
+  position: absolute;
+  top: 30px;
+  left: 50%;
+  translate: -50% 0;
+  padding: 2px 6px;
+  border: 2px solid #000;
+  background: var(--mint);
+  color: #000;
+  font-family: Minecraft, ui-monospace, monospace;
+  font-size: 0.62rem;
+  white-space: nowrap;
+  box-shadow: 3px 3px 0 0 #000;
+}
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+/* Click feedback — square ripples, stepped like sprite animation. */
+.ripple {
+  position: absolute;
+  translate: -50% -50%;
+  width: 26px;
+  height: 26px;
+  border: 3px solid var(--primary);
+  box-shadow: 0 0 0 2px #000;
+  pointer-events: none;
+  z-index: 2;
+  animation: ripple-out 0.9s steps(6, end) forwards;
+}
+
+.ripple-alternate {
+  border-color: var(--mint);
+  animation-name: ripple-in;
+}
+
+@keyframes ripple-out {
+  from { transform: scale(0.3) rotate(0deg); opacity: 1; }
+  to { transform: scale(4.2) rotate(45deg); opacity: 0; }
+}
+
+@keyframes ripple-in {
+  from { transform: scale(4) rotate(45deg); opacity: 0.9; }
+  to { transform: scale(0.4) rotate(0deg); opacity: 0; }
+}
+
+/* Corner brackets. */
+.corner {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border: 3px solid #ffffff40;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.corner-tl { top: 10px; left: 10px; border-right: 0; border-bottom: 0; }
+.corner-tr { top: 10px; right: 10px; border-left: 0; border-bottom: 0; }
+.corner-bl { bottom: 10px; left: 10px; border-right: 0; border-top: 0; }
+.corner-br { bottom: 10px; right: 10px; border-left: 0; border-top: 0; }
+
+/* Keycaps — chunky, with a real travel on press. */
+.keycap {
   display: grid;
-  width: 100%;
-  height: 100%;
-  padding: 16px;
-  color: #77746b;
-  font-size: 0.76rem;
-  text-align: center;
   place-items: center;
+  min-width: 34px;
+  height: 30px;
+  padding: 0 8px;
+  border: 2px solid #000;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-family: Minecraft, ui-monospace, monospace;
+  font-size: 0.62rem;
+  box-shadow: 3px 3px 0 0 #000;
+  transition: none;
 }
 
-.nano-preview figcaption {
-  margin-top: 5px;
-  color: #77746b;
-  font-size: 0.7rem;
+.keycap-wide {
+  min-width: 62px;
 }
 
-.error {
-  margin: 0;
-  padding: 10px;
-  color: #ffb2b2;
-  font-size: 0.85rem;
-  background: #3c1717;
-  border-radius: 8px;
+.keycap-down {
+  translate: 3px 3px;
+  background: var(--primary);
+  color: #000;
+  box-shadow: 0 0 0 0 #000;
 }
 
-aside {
-  padding: 10px;
-  color: #77746b;
-  font-size: 0.76rem;
-  line-height: 1.5;
-  background: #0b0b0c;
-  border-radius: 8px;
+/* Scrollable panel bodies keep the cabinet a fixed height. */
+.scroll-body {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--secondary) transparent;
 }
 
-aside strong,
-aside code {
-  display: block;
+/* Pixel RetroUI's Card and Button ship their own margins; inside our
+   layouts we drive spacing with the grid instead. */
+.pixel-flush {
+  margin: 0 !important;
 }
 
-aside code {
-  margin-top: 4px;
-  color: #aaa69a;
-  overflow-wrap: anywhere;
-}
-
-@media (max-width: 800px) {
-  main {
-    padding: 28px 0;
-  }
-
-  .session-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .two-column {
-    grid-template-columns: 1fr;
-  }
-
-  .nano-preview-grid {
-    grid-template-columns: 1fr;
+@media (prefers-reduced-motion: reduce) {
+  .crosshair-ring,
+  .ripple {
+    animation: none;
   }
 }

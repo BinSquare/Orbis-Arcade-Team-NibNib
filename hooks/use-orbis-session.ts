@@ -1,13 +1,19 @@
 "use client";
 
 import { useReactor, useReactorMessage } from "@reactor-team/js-sdk";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   DOCUMENTED_RESOLUTIONS,
+  isRetryableConnectError,
   type OrbisMessage,
   unwrapOrbisMessage,
 } from "@/lib/orbis";
+
+/** Reactor hands out one concurrent session per model; a stale one frees up on
+ *  heartbeat timeout, so a few spaced retries usually beat a hard failure. */
+const CONNECT_ATTEMPTS = 4;
+const CONNECT_BACKOFF_MS = [2_000, 6_000, 12_000];
 
 export function useOrbisSession(onDisconnected: () => void) {
   const { status, connect, disconnect, sendCommand, uploadFile } = useReactor(
@@ -20,20 +26,21 @@ export function useOrbisSession(onDisconnected: () => void) {
     }),
   );
 
-  const [prompt, setPrompt] = useState("");
-  const [image, setImage] = useState<File | null>(null);
   const [resolution, setResolution] = useState("");
   const [availableResolutions, setAvailableResolutions] = useState<string[]>(
     DOCUMENTED_RESOLUTIONS,
   );
   const [muted, setMuted] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [nanoBusy, setNanoBusy] = useState(false);
   const [runStarted, setRunStarted] = useState(false);
   const [paused, setPaused] = useState(false);
   const [imageStatus, setImageStatus] = useState("");
   const [error, setError] = useState("");
   const [events, setEvents] = useState<string[]>([]);
+  const [connectNotice, setConnectNotice] = useState("");
+
+  /** Increments on every `chunk_complete` — the game loop's clock. */
+  const [chunkTick, setChunkTick] = useState(0);
 
   const previousStatus = useRef(status);
   const disconnecting = useRef(false);
@@ -42,7 +49,6 @@ export function useOrbisSession(onDisconnected: () => void) {
   const expectsImageForRun = useRef(false);
 
   const connected = status === "ready";
-  const controlsBusy = busy || nanoBusy;
 
   useEffect(() => {
     if (
@@ -78,12 +84,12 @@ export function useOrbisSession(onDisconnected: () => void) {
       setRunStarted(true);
       setPaused(false);
       if (message.image_conditioned === true) {
-        setImageStatus("Orbis started from this image");
+        setImageStatus("World locked to your image");
       } else if (
         message.image_conditioned === false &&
         expectsImageForRun.current
       ) {
-        setImageStatus("Orbis started without image conditioning");
+        setImageStatus("Started without image conditioning");
         setError("Orbis started without the uploaded image.");
       }
     } else if (message.type === "generation_paused") {
@@ -120,6 +126,11 @@ export function useOrbisSession(onDisconnected: () => void) {
           !current || reported.includes(current) ? current : "",
         );
       }
+    }
+
+    // The game loop steers on this boundary — steering lands at the next one.
+    if (message.type === "chunk_complete") {
+      setChunkTick((current) => current + 1);
     }
 
     if (!disconnecting.current) updateRunState(message);
@@ -160,12 +171,40 @@ export function useOrbisSession(onDisconnected: () => void) {
     };
   };
 
-  // Shared by the regular form and the Nano Banana one-click example.
-  const startGeneration = async (
-    startImage: File | null,
-    runPrompt: string,
-  ) => {
-    if (!runPrompt.trim()) throw new Error("Enter a prompt before starting.");
+  /* ---------------------------------------------------------------- */
+  /* Connect, with backoff for capacity and quota 429s                 */
+  /* ---------------------------------------------------------------- */
+
+  const connectSession = () =>
+    runAction(async () => {
+      setConnectNotice("");
+      for (let attempt = 0; attempt < CONNECT_ATTEMPTS; attempt += 1) {
+        try {
+          await connect();
+          setConnectNotice("");
+          return;
+        } catch (caught) {
+          const last = attempt === CONNECT_ATTEMPTS - 1;
+          if (last || !isRetryableConnectError(caught)) {
+            setConnectNotice("");
+            throw caught;
+          }
+          const wait = CONNECT_BACKOFF_MS[attempt] ?? 12_000;
+          setConnectNotice(
+            `Reactor is at capacity. Retry ${attempt + 2} of ${CONNECT_ATTEMPTS} in ${Math.round(wait / 1000)}s…`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, wait));
+        }
+      }
+    });
+
+  /* ---------------------------------------------------------------- */
+  /* Run lifecycle                                                     */
+  /* ---------------------------------------------------------------- */
+
+  /** Uploads the world image, stages resolution, then starts generation. */
+  const startGame = async (startImage: File | null, worldPrompt: string) => {
+    if (!worldPrompt.trim()) throw new Error("The world needs a description.");
     expectsImageForRun.current = Boolean(startImage);
 
     if (startImage) {
@@ -174,7 +213,7 @@ export function useOrbisSession(onDisconnected: () => void) {
       const rawReply = await sendCommand("set_image", { image: uploaded });
       if (!rawReply) {
         imageReady.cancel();
-        throw new Error("Orbis did not accept the uploaded start image.");
+        throw new Error("Orbis did not accept the world image.");
       }
 
       const reply = unwrapOrbisMessage(rawReply);
@@ -193,7 +232,7 @@ export function useOrbisSession(onDisconnected: () => void) {
 
       const dimensions =
         reply.width && reply.height ? ` (${reply.width}×${reply.height})` : "";
-      setImageStatus(`Orbis accepted image${dimensions}`);
+      setImageStatus(`World locked to your image${dimensions}`);
       setEvents((current) => ["image_accepted", ...current].slice(0, 8));
     }
 
@@ -204,11 +243,11 @@ export function useOrbisSession(onDisconnected: () => void) {
       "conditions_ready",
     );
     const promptReply = await sendCommand("set_prompt", {
-      prompt: runPrompt.trim(),
+      prompt: worldPrompt.trim(),
     });
     if (!promptReply) {
       conditionsReady.cancel();
-      throw new Error("Orbis did not accept the prompt.");
+      throw new Error("Orbis did not accept the world prompt.");
     }
 
     const promptMessage = unwrapOrbisMessage(promptReply);
@@ -224,27 +263,23 @@ export function useOrbisSession(onDisconnected: () => void) {
     setPaused(false);
   };
 
-  const selectImage = (nextImage: File | null) => {
-    setImage(nextImage);
-    setImageStatus("");
-  };
-
-  const startRun = () => runAction(() => startGeneration(image, prompt));
-
-  const startFromNanoOutput = async (
-    editedImage: File,
-    groundedPrompt: string,
-  ) => {
-    setImage(editedImage);
-    setPrompt(groundedPrompt);
-    await runAction(() => startGeneration(editedImage, groundedPrompt));
-  };
-
-  const steer = () =>
-    runAction(async () => {
-      if (!prompt.trim()) throw new Error("Enter a prompt before steering.");
-      await sendCommand("set_prompt", { prompt: prompt.trim() });
-    });
+  /**
+   * Fire-and-forget steering for the game loop. Deliberately does not go
+   * through `runAction`: flipping a global busy flag every chunk would make the
+   * whole HUD flicker, and a dropped steer is not worth interrupting play.
+   */
+  const steerTo = useCallback(
+    async (prompt: string) => {
+      try {
+        await sendCommand("set_prompt", { prompt });
+        return true;
+      } catch (caught) {
+        console.warn("Steering failed", caught);
+        return false;
+      }
+    },
+    [sendCommand],
+  );
 
   const disconnectSession = async () => {
     disconnecting.current = true;
@@ -265,27 +300,25 @@ export function useOrbisSession(onDisconnected: () => void) {
   return {
     status,
     connected,
-    controlsBusy,
+    busy,
     runStarted,
     paused,
     muted,
-    prompt,
-    image,
     imageStatus,
     resolution,
     availableResolutions,
     error,
+    connectNotice,
     events,
-    connectSession: () => runAction(() => connect()),
+    chunkTick,
+    connectSession,
     disconnectSession,
     toggleMuted: () => setMuted((current) => !current),
-    setPrompt,
-    selectImage,
     setResolution,
-    startRun,
-    startFromNanoOutput,
-    setNanoBusy,
-    steer,
+    setError,
+    startGame: (image: File | null, worldPrompt: string) =>
+      runAction(() => startGame(image, worldPrompt)),
+    steerTo,
     pause: () => runAction(() => sendCommand("pause", {})),
     resume: () => runAction(() => sendCommand("resume", {})),
     reset: () => runAction(() => sendCommand("reset", {})),

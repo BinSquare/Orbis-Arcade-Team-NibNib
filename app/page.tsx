@@ -1,16 +1,9 @@
-import { OrbisDemo } from "@/components/orbis-demo";
+import { GameShell } from "@/components/game-shell";
 
 export default function Home() {
   return (
     <main>
-      <header>
-        <h1>Orbis starter</h1>
-        <p>
-          Connect, generate a continuous live video, then steer it by changing
-          the prompt while it runs.
-        </p>
-      </header>
-      <OrbisDemo />
+      <GameShell />
     </main>
   );
 }
