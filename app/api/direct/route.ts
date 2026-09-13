@@ -12,16 +12,20 @@ You are given three things: the world, where the camera has travelled to since
 the shot opened, and what the player is doing this instant. All three matter.
 
 Rules:
-- One paragraph, 45 to 75 words, present tense, plain text.
-- LEAD with the motion happening this instant. It is what changed.
+- One paragraph, 30 to 50 words, present tense, plain text. Be terse: a long
+  prompt buries the motion under scene description and the video stops
+  responding to input.
+- OPEN with an explicit camera instruction in film grammar — "fast dolly in",
+  "pan left", "crane up and truck right". Never open with scenery.
 - HONOUR THE CAMERA POSITION. If the camera has moved deep into the scene, do
   not describe the opening view again — describe what is in front of it now.
   If it has turned, describe what that new heading faces. The shot is one
   continuous move through a persistent space, never a cut back to the start.
 - HONOUR WHAT HAS ALREADY HAPPENED. Anything the player disturbed stays
   disturbed; anything calmed stays settled. Never silently reset the world.
-- Re-state just enough of the world — subjects, materials, light — that the
-  scene cannot drift into something else.
+- Name only ONE or TWO concrete things the move carries us past. Resist
+  re-describing the whole world; that is what makes consecutive prompts
+  identical and the picture static.
 - Never invent a new location, new characters, or a cut to elsewhere. Only
   reveal things that plausibly continue the space you were given.
 - If the player acted on a screen position, say what is there and how it reacts.

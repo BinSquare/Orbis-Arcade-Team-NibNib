@@ -18,9 +18,17 @@ camera language is useless — "the camera moves forward" tells the video model
 nothing. Name what the camera moves past, toward, over, or between, using only
 things actually visible in the image.
 
-For each movement, write one present-tense clause, 8 to 18 words, lowercase, no
-final period. It must be grounded in real detail from the image: the surfaces,
-objects, subjects, depth, and light that are actually there.
+For each movement, write ONE SHORT CLAUSE naming what the camera passes,
+approaches, or reveals — 6 to 12 words, lowercase, no final period.
+
+Do NOT write camera verbs. Never begin with "the camera", "the view", "we see",
+or any dolly/pan/crane wording: the camera instruction is added separately and
+yours would fight it. Write only the scenery the move carries us through, as a
+fragment. Good: "past the moss-draped trunks and the fallen log". Bad: "the
+camera pushes forward through the trees".
+
+Ground every clause in real detail from the image: the surfaces, objects,
+subjects, depth, and light that are actually there.
 
 Field rules:
 - forward/back: what the camera closes on, or what opens up as it retreats.

@@ -95,15 +95,16 @@ export type ActionLexicon = {
  */
 export function fallbackLexicon(world: string): ActionLexicon {
   return {
-    forward: "the camera pushes forward, deeper into the scene",
-    back: "the camera pulls back, away from the scene",
-    strafeLeft: "the camera slides to the left",
-    strafeRight: "the camera slides to the right",
-    turnLeft: "the view turns left, revealing what was off-frame",
-    turnRight: "the view turns right, revealing what was off-frame",
-    rise: "the camera rises for a higher vantage",
-    descend: "the camera lowers toward the ground",
-    idle: "the camera holds steady while the scene keeps moving on its own",
+    // Scenery fragments only — the camera verb is prepended by the composer.
+    forward: "deeper into the scene, past whatever stands nearest",
+    back: "away from the scene, the surroundings opening out",
+    strafeLeft: "sideways past what stands to the left",
+    strafeRight: "sideways past what stands to the right",
+    turnLeft: "swinging what was off-frame to the left into view",
+    turnRight: "swinging what was off-frame to the right into view",
+    rise: "up and over, revealing more of the space below",
+    descend: "down toward the ground and what rests on it",
+    idle: "the scene keeps moving on its own",
     sprint: "fast and urgent",
     interact:
       "whatever sits at the {zone} reacts, stirs, and moves in response",
@@ -174,6 +175,25 @@ export function describeSituation(context: DirectorContext): string {
 /* Composition                                                         */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Film-grammar camera terms, hardcoded rather than left to the lexicon.
+ *
+ * A video model reacts to "dolly in" far more strongly than to a description
+ * of what the shot would contain. The first version asked the model to write
+ * scenery ("the retriever's mouth fills the view"), which reads as a static
+ * state and rendered as one — the camera never actually moved.
+ */
+const CAMERA_MOVES: Record<string, string> = {
+  forward: "dolly in",
+  back: "dolly out",
+  strafeLeft: "truck left",
+  strafeRight: "truck right",
+  turnLeft: "pan left",
+  turnRight: "pan right",
+  rise: "crane up",
+  descend: "crane down",
+};
+
 function joinClauses(clauses: string[]): string {
   if (clauses.length === 1) return clauses[0];
   return `${clauses.slice(0, -1).join(", ")} while ${clauses[clauses.length - 1]}`;
@@ -183,12 +203,21 @@ function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/** The lexicon returns bare fragments; make one a sentence. */
+function sentence(text: string): string {
+  const trimmed = capitalize(text.trim());
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
 /**
- * Builds a full Orbis prompt from the lexicon and the accumulated state.
+ * Builds a full Orbis prompt.
  *
- * Order matters: the motion being applied leads (it is what changed), then
- * where the camera has got to, then what is still disturbed, then the anchor.
- * Leading with the world buried the only part that varies between chunks.
+ * Kept deliberately short and motion-dominant. The first version was 65 words
+ * of which ~60 were unchanging scene description, so consecutive prompts were
+ * 97% identical and the video simply carried on doing what it was doing. Now
+ * the camera instruction leads, the world anchor is dropped entirely while
+ * moving (it is dead weight that dilutes the only part that matters), and it
+ * returns only when the player is still and drift is the real risk.
  */
 export function composeFromLexicon(
   lexicon: ActionLexicon,
@@ -196,37 +225,35 @@ export function composeFromLexicon(
 ): string {
   const { input, pose, events, chunk } = context;
   const moving = MOVEMENT_ACTIONS.filter((action) => input.actions.has(action));
+  const fast = input.actions.has("sprint");
   const sentences: string[] = [];
 
   if (moving.length) {
-    const clauses = moving.map((action) => lexicon[action]);
-    const speed = input.actions.has("sprint") ? `, ${lexicon.sprint}` : "";
-    sentences.push(`${capitalize(joinClauses(clauses))}${speed}.`);
+    // Lead with the bare camera instruction, stated imperatively.
+    const moves = moving.map((action) => CAMERA_MOVES[action]).join(" and ");
+    sentences.push(`${capitalize(fast ? `fast ${moves}` : moves)}, continuously.`);
+
+    // One scenery clause for grounding — what the move carries us past.
+    sentences.push(sentence(lexicon[moving[0]]));
+    sentences.push(describePose(pose));
   } else {
-    sentences.push(`${capitalize(lexicon.idle)}.`);
-  }
-
-  sentences.push(describePose(pose));
-
-  if (input.pointer) {
-    sentences.push(`The ${describeZone(input.pointer)} stays clearly in view.`);
+    sentences.push("The camera comes to rest and holds still.");
+    sentences.push(sentence(lexicon.idle));
+    // Only re-anchor when nothing is moving; this is when drift can creep in.
+    sentences.push(sentence(lexicon.anchor));
   }
 
   const click = input.clicks[input.clicks.length - 1];
   if (click) {
     const template = click.kind === "primary" ? lexicon.interact : lexicon.calm;
-    sentences.push(
-      `${capitalize(template.replaceAll("{zone}", describeZone(click)))}.`,
-    );
+    sentences.push(sentence(template.replaceAll("{zone}", describeZone(click))));
   }
 
   const memory = describeEvents(events, chunk);
   // The freshest click is already spoken for by the lexicon line above.
   if (memory && !click) sentences.push(memory);
 
-  sentences.push(lexicon.anchor);
-  sentences.push("Continuous shot, no cuts, consistent world and subjects.");
-
+  sentences.push("Continuous shot, no cuts.");
   return sentences.join(" ");
 }
 

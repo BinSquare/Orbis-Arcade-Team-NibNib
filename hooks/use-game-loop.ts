@@ -192,8 +192,13 @@ export function useGameLoop({
     const context = contextNow(input);
     const signature = signatureOf(context);
 
-    // A click is one-shot and must always go out; held keys dedupe.
-    if (signature === lastSigRef.current && !hasClick) {
+    // Motion must be re-sent every boundary even when the signature is
+    // unchanged. Orbis continues whatever it was doing, so an unreinforced
+    // camera move coasts to a halt — and the pose bucket saturates after a few
+    // seconds of held input, which used to stop the sends entirely. Dedupe only
+    // applies when the player is still.
+    const moving = input.actions.size > 0;
+    if (signature === lastSigRef.current && !hasClick && !moving) {
       warmDirector(signature, context);
       return;
     }

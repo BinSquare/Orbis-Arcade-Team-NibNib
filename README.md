@@ -55,11 +55,17 @@ prompts** — grounded in your specific image.
 A Gemini call takes 1-3s and chunk boundaries are ~1.8s apart, so a synchronous
 call per chunk is impossible. Two layers solve that:
 
-**1. The lexicon** (`/api/lexicon`, one call when the image loads). Gemini looks
-at the image and writes how each control reads *in this scene*. Not "the camera
-moves forward" but "the camera pushes between the mossy trunks, ferns brushing
-the lens". Composing a prompt from the lexicon is instant, so every boundary
-always has something grounded to send.
+**1. The lexicon** (`/api/lexicon`, one call when the image loads). The model
+writes, for each control, a short fragment naming what that move carries you
+past *in this scene* — "past the retriever's feathery tail and lichen-mottled
+foreground stone". Composing from it is instant, so every boundary has
+something grounded to send.
+
+The camera verb itself is **not** left to the model: `CAMERA_MOVES` in
+`lib/game-director.ts` maps each control to film grammar (`dolly in`,
+`truck left`, `crane up`, `pan right`) and that leads the prompt. An early
+version had the model describe what the shot would contain, which reads as a
+static state and rendered as one — the camera never actually moved.
 
 **2. The director** (`/api/direct`, async, per input combination). Input state
 is reduced to a signature — held keys, aim bucketed to a 3x3 zone, last click.
@@ -98,6 +104,21 @@ Two more structural choices:
   buried the only part that changes between chunks.
 - **A click is never deduped.** Held keys are — re-sending identical text just
   spends a boundary — but a click is a one-shot event and always goes out.
+
+### Why prompts are short
+
+An early version sent 65 words of which ~60 were unchanging scene description.
+Consecutive prompts were 97% identical and only ~4 words concerned motion, so
+the video just carried on doing whatever it was doing. Now the camera
+instruction leads, the world anchor is dropped entirely while moving, and a
+moving prompt is ~30 words. The anchor returns only when the player is still,
+which is when drift is the real risk.
+
+Motion is also re-sent every boundary even when nothing changed. Orbis
+continues whatever it was doing, so an unreinforced camera move coasts to a
+halt — and the pose bucket saturates after a few seconds of held input, which
+used to stop the sends altogether. Dedupe now applies only when the player is
+still.
 
 ### Latency
 
