@@ -102,6 +102,30 @@ export function ActionReadout({
           {telemetry.queued ? "QUEUED" : "SYNCED"}
         </span>
       </div>
+
+      {/* Where the chain breaks, if it breaks: loop ticking -> prompts
+          attempted -> accepted by Orbis -> chunks coming back. */}
+      <div className="flex items-center gap-3">
+        <span className="font-pixel w-12 shrink-0 text-[0.6rem] text-muted-foreground">
+          LOOP
+        </span>
+        <span className="font-pixel text-[0.6rem] text-muted-foreground">
+          <span className={telemetry.diag.ticks ? "text-accent" : "text-destructive"}>
+            tick {telemetry.diag.ticks}
+          </span>
+          {" · "}
+          <span className={telemetry.diag.ok ? "text-accent" : "text-destructive"}>
+            sent {telemetry.diag.ok}
+          </span>
+          {telemetry.diag.failed > 0 && (
+            <span className="text-destructive"> · failed {telemetry.diag.failed}</span>
+          )}
+          {" · "}
+          <span className={telemetry.diag.chunks ? "text-accent" : "text-destructive"}>
+            chunks {telemetry.diag.chunks}
+          </span>
+        </span>
+      </div>
     </div>
   );
 }

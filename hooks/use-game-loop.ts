@@ -68,6 +68,14 @@ export type GameLoopTelemetry = {
   eventCount: number;
   /** Where those fires are, so the viewport can mark them. */
   fires: { x: number; y: number; id: number }[];
+  /** Live diagnostics: is the loop actually running and reaching Orbis? */
+  diag: {
+    ticks: number;
+    attempts: number;
+    ok: number;
+    failed: number;
+    chunks: number;
+  };
 };
 
 type GameLoopOptions = {
@@ -94,6 +102,7 @@ export function useGameLoop({
 }: GameLoopOptions): GameLoopTelemetry {
   const lastSigRef = useRef("");
   const lastSendAtRef = useRef(0);
+  const lastTickAtRef = useRef(performance.now());
   const lastBoundaryRef = useRef(performance.now());
   const inFlightRef = useRef(false);
 
@@ -104,6 +113,8 @@ export function useGameLoop({
   /** Zone doused this send, shown going out exactly once. */
   const dousedRef = useRef<string | undefined>(undefined);
   const chunkRef = useRef(0);
+
+  const diagRef = useRef({ ticks: 0, attempts: 0, ok: 0, failed: 0, chunks: 0 });
 
   const cacheRef = useRef(new Map<string, string>());
   const pendingRef = useRef(new Set<string>());
@@ -125,6 +136,7 @@ export function useGameLoop({
     pose: "",
     eventCount: 0,
     fires: [],
+    diag: { ticks: 0, attempts: 0, ok: 0, failed: 0, chunks: 0 },
   });
 
   /** Fire positions for the HUD, keyed stably by when each was lit. */
@@ -230,12 +242,15 @@ export function useGameLoop({
 
     inFlightRef.current = true;
     lastSendAtRef.current = now;
+    diagRef.current.attempts += 1;
     // Clear first: a click arriving mid-send belongs to the next send, not this
     // one, and must not be silently dropped.
     consumeClicks();
 
     const sent = await steerTo(prompt);
     inFlightRef.current = false;
+    if (sent) diagRef.current.ok += 1;
+    else diagRef.current.failed += 1;
 
     // Warm after sending so the request never competes with the steer itself.
     warmDirector(signature, context);
@@ -269,36 +284,53 @@ export function useGameLoop({
   /* Input poll: integrate the camera, then steer if anything changed  */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * The poll reads its work through a ref rather than closing over it.
+   *
+   * `useGameInput` re-renders this component on every animation frame while
+   * the pointer moves. If the interval's effect depended on callbacks that
+   * change identity, it would be cleared and recreated every ~16ms and never
+   * survive long enough to reach its own 80ms deadline — the controls would go
+   * completely dead while the mouse was moving, which is the worst possible
+   * time for that to happen.
+   */
+  const tickRef = useRef<() => void>(() => {});
+  tickRef.current = () => {
+    const now = performance.now();
+    const delta = Math.min(0.5, (now - lastTickAtRef.current) / 1000);
+    lastTickAtRef.current = now;
+    diagRef.current.ticks += 1;
+
+    const input = readState();
+    if (input.actions.size) {
+      poseRef.current = integrate(poseRef.current, input.actions, delta);
+    }
+    if (now - lastSendAtRef.current >= MIN_SEND_INTERVAL_MS) {
+      void steerNow();
+    }
+  };
+
   useEffect(() => {
     if (!active) return;
-    let last = performance.now();
+    lastTickAtRef.current = performance.now();
+    const timer = setInterval(() => tickRef.current(), INPUT_POLL_MS);
+    return () => clearInterval(timer);
+  }, [active]);
+
+  // Telemetry refresh, deliberately slower than the poll.
+  useEffect(() => {
+    if (!active) return;
     const timer = setInterval(() => {
       const now = performance.now();
-      const delta = (now - last) / 1000;
-      last = now;
-
-      const input = readState();
-      if (input.actions.size) {
-        poseRef.current = integrate(poseRef.current, input.actions, delta);
-      }
-
-      // Cheap guard: only pay for signature building when something could send.
-      if (now - lastSendAtRef.current >= MIN_SEND_INTERVAL_MS) {
-        void steerNow();
-      }
-
-      setTelemetry((current) => {
-        const progress = Math.min(
-          1,
-          (now - lastBoundaryRef.current) / CHUNK_PERIOD_MS,
-        );
-        return current.chunkProgress === progress
-          ? current
-          : { ...current, chunkProgress: progress };
-      });
-    }, INPUT_POLL_MS);
+      setTelemetry((current) => ({
+        ...current,
+        chunkProgress: Math.min(1, (now - lastBoundaryRef.current) / CHUNK_PERIOD_MS),
+        pose: describePose(poseRef.current),
+        diag: { ...diagRef.current },
+      }));
+    }, 250);
     return () => clearInterval(timer);
-  }, [active, readState, steerNow]);
+  }, [active]);
 
   /* ---------------------------------------------------------------- */
   /* Chunk boundaries: the real clock                                  */
@@ -309,6 +341,7 @@ export function useGameLoop({
 
     lastBoundaryRef.current = performance.now();
     chunkRef.current += 1;
+    diagRef.current.chunks += 1;
     // Whatever was queued has now been applied.
     setTelemetry((current) => ({
       ...current,
@@ -325,17 +358,20 @@ export function useGameLoop({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, chunkTick]);
 
-  // Safety net for a stalled event stream.
+  // Safety net for a stalled event stream, also read through a ref.
+  const stallRef = useRef<() => void>(() => {});
+  stallRef.current = () => {
+    if (performance.now() - lastBoundaryRef.current < FALLBACK_TICK_MS) return;
+    lastBoundaryRef.current = performance.now();
+    chunkRef.current += 1;
+    void steerNow();
+  };
+
   useEffect(() => {
     if (!active) return;
-    const timer = setInterval(() => {
-      if (performance.now() - lastBoundaryRef.current < FALLBACK_TICK_MS) return;
-      lastBoundaryRef.current = performance.now();
-      chunkRef.current += 1;
-      void steerNow();
-    }, FALLBACK_TICK_MS / 2);
+    const timer = setInterval(() => stallRef.current(), FALLBACK_TICK_MS / 2);
     return () => clearInterval(timer);
-  }, [active, steerNow]);
+  }, [active]);
 
   // A fresh run starts from the opening vantage with no memory.
   useEffect(() => {
@@ -349,6 +385,7 @@ export function useGameLoop({
     cacheRef.current.clear();
     pendingRef.current.clear();
     failedRef.current.clear();
+    diagRef.current = { ticks: 0, attempts: 0, ok: 0, failed: 0, chunks: 0 };
     setTelemetry({
       lastSent: "",
       lastSource: "none",
@@ -359,6 +396,7 @@ export function useGameLoop({
       pose: "",
       eventCount: 0,
       fires: [],
+      diag: { ticks: 0, attempts: 0, ok: 0, failed: 0, chunks: 0 },
     });
   }, [active]);
 

@@ -271,10 +271,19 @@ export function useOrbisSession(onDisconnected: () => void) {
   const steerTo = useCallback(
     async (prompt: string) => {
       try {
-        await sendCommand("set_prompt", { prompt });
+        const reply = await sendCommand("set_prompt", { prompt });
+        const message = unwrapOrbisMessage(reply);
+        // A rejected steer looks identical to a working one from the outside,
+        // so surface it rather than letting the run look silently inert.
+        if (message?.type === "command_error") {
+          setError(`set_prompt: ${message.reason || "rejected"}`);
+          return false;
+        }
         return true;
       } catch (caught) {
-        console.warn("Steering failed", caught);
+        setError(
+          `set_prompt failed: ${caught instanceof Error ? caught.message : String(caught)}`,
+        );
         return false;
       }
     },
