@@ -162,61 +162,89 @@ export function poseBucket(pose: CameraPose): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* World memory                                                        */
+/* Fire                                                                */
 /* ------------------------------------------------------------------ */
 
-export type WorldEvent = {
+/**
+ * Left click ignites the spot under the crosshair; right click douses it.
+ *
+ * Fire is the one interaction that reads unmistakably on video — flame, smoke
+ * and firelight change the frame far more than "something reacts" ever did.
+ * Fires persist until doused rather than ageing out, and they intensify with
+ * every chunk they survive, so a run accumulates real consequences.
+ */
+export type Fire = {
   zone: string;
-  kind: ClickKind;
-  /** Chunk index the event happened on, for ageing it out. */
-  at: number;
+  x: number;
+  y: number;
+  /** Chunk index it was lit on, which drives how fierce it reads. */
+  litAt: number;
 };
 
-/** Interactions stay in the prompt this many chunks before being dropped. */
-const EVENT_MEMORY = 3;
+/** Past this the prompt gets crowded and every fire reads the same. */
+const MAX_FIRES = 4;
+/** Normalized screen distance within which a douse puts a fire out. */
+const DOUSE_RADIUS = 0.22;
 
-export function recordEvent(
-  log: WorldEvent[],
-  state: GameInputState,
+export function igniteAt(
+  fires: Fire[],
+  click: { x: number; y: number },
   chunk: number,
-): WorldEvent[] {
-  const click = state.clicks[state.clicks.length - 1];
-  if (!click) return log;
+): Fire[] {
+  // Clicking an existing fire feeds it rather than stacking a duplicate.
+  const existing = fires.find((fire) => distance(fire, click) < DOUSE_RADIUS);
+  if (existing) return fires;
   return [
-    ...log,
-    { zone: describeZone(click), kind: click.kind, at: chunk },
-  ].slice(-EVENT_MEMORY);
+    ...fires,
+    { zone: describeZone(click), x: click.x, y: click.y, litAt: chunk },
+  ].slice(-MAX_FIRES);
 }
 
-export function ageEvents(log: WorldEvent[], chunk: number): WorldEvent[] {
-  return log.filter((event) => chunk - event.at < EVENT_MEMORY);
+export function douseAt(fires: Fire[], click: { x: number; y: number }): Fire[] {
+  return fires.filter((fire) => distance(fire, click) >= DOUSE_RADIUS);
+}
+
+function distance(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+/** How fierce a fire reads, from the chunks it has survived. */
+function intensity(fire: Fire, chunk: number): string {
+  const age = chunk - fire.litAt;
+  if (age <= 0) return "flames just catching, small and bright";
+  if (age === 1) return "flames climbing steadily with rising smoke";
+  if (age <= 3) return "burning hard, thick smoke, embers lifting";
+  return "an intense blaze, heavy black smoke, glowing embers everywhere";
 }
 
 /**
- * Turns the log into persistence language. Without this a disturbed thing
- * snaps back to its original state on the very next chunk.
+ * Fire language for the prompt. Firelight is called out explicitly because it
+ * is what ties the fire into the rest of the frame rather than leaving it a
+ * sticker floating on top of the scene.
  */
-export function describeEvents(log: WorldEvent[], chunk: number): string {
-  if (!log.length) return "";
+export function describeFires(fires: Fire[], chunk: number): string {
+  if (!fires.length) return "";
 
-  const newest = log[log.length - 1];
-  const older = log.slice(0, -1);
-  const parts: string[] = [];
-
-  parts.push(
-    newest.at === chunk
-      ? newest.kind === "primary"
-        ? `Right now whatever sits at the ${newest.zone} is reacting — it moves, stirs, and draws attention.`
-        : `Right now whatever sits at the ${newest.zone} is settling down and going still.`
-      : newest.kind === "primary"
-        ? `Whatever was disturbed at the ${newest.zone} is still active and has not returned to how it was.`
-        : `Whatever was calmed at the ${newest.zone} remains still and settled.`,
+  const parts = fires.map(
+    (fire) => `at the ${fire.zone}, ${intensity(fire, chunk)}`,
   );
 
-  if (older.length) {
-    const zones = [...new Set(older.map((event) => event.zone))].join(" and the ");
-    parts.push(`The ${zones} still shows the after-effects of earlier activity.`);
-  }
+  const lead =
+    fires.length === 1
+      ? `Fire burns ${parts[0]}.`
+      : `Fires burn ${parts.join("; and ")}.`;
 
-  return parts.join(" ");
+  return `${lead} Firelight flickers across everything nearby and smoke drifts upward.`;
+}
+
+/** Doused this chunk, so the prompt can show the fire going out. */
+export function describeDouse(zone: string): string {
+  return `The fire at the ${zone} is smothered — flames collapse into steam and drifting smoke over blackened, wet remains.`;
+}
+
+/** Cache key fragment: which fires exist and how fierce each reads. */
+export function fireSignature(fires: Fire[], chunk: number): string {
+  return fires
+    .map((fire) => `${fire.zone[0]}${Math.min(4, chunk - fire.litAt)}`)
+    .join(",");
 }

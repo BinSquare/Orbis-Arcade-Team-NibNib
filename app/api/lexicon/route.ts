@@ -41,11 +41,20 @@ Field rules:
 - sprint: how the motion feels when fast. 2 to 4 words describing MANNER only,
   never a place or direction — "hard and urgent", "at a breathless run". It is
   appended after a comma, so it must read as an adverbial, not a location.
-- interact: what happens when the player acts on a spot. MUST contain the exact
-  token {zone}, used mid-sentence as a place, never as the first word. It is
-  substituted with a phrase like "lower right of the frame", so write around it:
-  "the reeds at the {zone} thrash and scatter". Describe reaction and motion.
-- calm: the opposite, same {zone} rule. Settling, stilling, receding.
+- ignite: fire erupting at a spot the player clicks. Name the material in this
+  image that would actually catch — dry grass, timber, paper, fabric, brush —
+  and describe flame, smoke, and the firelight it throws. 12 to 22 words.
+- douse: the same fire going out. Steam, collapsing flame, blackened wet
+  remains. 10 to 18 words.
+
+  ignite and douse MUST each contain the exact token {zone}, used mid-sentence
+  as a place and never as the first word. It is replaced with a phrase like
+  "lower right of the frame", so write around it: "flames tear through the dry
+  scrub at the {zone}, throwing orange light".
+
+  Fire takes hold of the ENVIRONMENT only — ground cover, wood, stone, water's
+  edge, structures. People and animals in the image never burn: if any are
+  near, they recoil, bolt, or back away from the heat.
 - anchor: at most 25 words re-stating the scene's identity, subjects, and
   lighting so a long run cannot drift. Present tense, no camera language.
 

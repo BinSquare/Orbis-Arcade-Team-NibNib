@@ -41,8 +41,8 @@ Reactor JWT and the generated world text.
 | `Space` / `C` | Rise / descend |
 | `Shift` | Move quickly |
 | Mouse move | Aim — the scene holds attention where you point |
-| Left click | Act — whatever is there reacts and moves |
-| Right click | Calm — that element recedes or settles |
+| Left click | **Ignite** — set that spot on fire |
+| Right click | **Douse** — put out a fire you lit there |
 | `P` / `M` / `Esc` | Pause · sound · exit world |
 
 ## How input becomes video
@@ -90,10 +90,15 @@ accumulated. `lib/game-camera.ts` fixes that with two pieces of state:
   left"*. Holding W becomes travel instead of a repeated instruction, and the
   director is told to describe what faces the camera **now**, never to cut back
   to the opening view.
-- **World memory.** A click appends to a log kept for three chunks. The chunk it
-  lands on fires the interaction; the ones after say *"whatever was disturbed at
-  the centre is still active and has not returned to how it was"*, so effects
-  persist instead of snapping back.
+- **Fire.** Left click ignites the spot under the crosshair, right click douses
+  it. Fires persist until put out — not on a timer — and intensify with every
+  chunk they survive: *"flames just catching"* → *"climbing steadily with rising
+  smoke"* → *"burning hard, embers lifting"* → *"an intense blaze"*. Up to four
+  burn at once, each marked on the viewport. Fire is the interaction that reads
+  unmistakably on video, where a generic "something reacts" did not.
+
+  Fire takes the environment only. The lexicon prompt requires that people and
+  animals in the image recoil or bolt from the heat rather than burn.
 
 Both feed the cache key, so moving somewhere genuinely new correctly
 invalidates a cached prompt while small drift still reuses it.

@@ -21,15 +21,18 @@ Rules:
   not describe the opening view again — describe what is in front of it now.
   If it has turned, describe what that new heading faces. The shot is one
   continuous move through a persistent space, never a cut back to the start.
-- HONOUR WHAT HAS ALREADY HAPPENED. Anything the player disturbed stays
-  disturbed; anything calmed stays settled. Never silently reset the world.
+- HONOUR THE FIRES. Any fire you are told about is still burning and has grown,
+  not gone out. Keep its flame, smoke, and the firelight it throws on nearby
+  surfaces in frame. Never silently extinguish one.
+- Fire consumes the environment only. People and animals never burn — they
+  recoil, bolt, or back away from the heat.
 - Name only ONE or TWO concrete things the move carries us past. Resist
   re-describing the whole world; that is what makes consecutive prompts
   identical and the picture static.
 - Never invent a new location, new characters, or a cut to elsewhere. Only
   reveal things that plausibly continue the space you were given.
-- If the player acted on a screen position, say what is there and how it reacts.
-  Keep it physical: it moves, stirs, topples, scatters, flares, settles.
+- If a fire has just been lit, lead the second half with it igniting: what
+  catches, the flame front, the smoke, the light it throws.
 - Never mention the player, the camera operator, controls, keys, or the mouse.
   The camera IS the player's viewpoint.
 - End with: Continuous shot, no cuts.

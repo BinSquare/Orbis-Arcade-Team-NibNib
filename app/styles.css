@@ -231,32 +231,56 @@ h3 {
   50% { transform: scale(1.15); }
 }
 
-/* Click feedback — square ripples, stepped like sprite animation. */
+/* Click feedback. Left click ignites, so the marker reads as a flame burst;
+   right click douses, so it collapses inward in cold steam. */
 .ripple {
   position: absolute;
   translate: -50% -50%;
   width: 26px;
   height: 26px;
-  border: 3px solid var(--primary);
-  box-shadow: 0 0 0 2px #000;
+  border: 3px solid #ff7a18;
+  background: radial-gradient(circle, #ffd15c99, #ff3d0055 55%, transparent 70%);
+  box-shadow: 0 0 0 2px #000, 0 0 22px 6px #ff6a0080;
   pointer-events: none;
   z-index: 2;
-  animation: ripple-out 0.9s steps(6, end) forwards;
+  animation: ignite 0.9s steps(6, end) forwards;
 }
 
 .ripple-alternate {
   border-color: var(--mint);
-  animation-name: ripple-in;
+  background: radial-gradient(circle, #ffffff88, #5fe3d055 55%, transparent 70%);
+  box-shadow: 0 0 0 2px #000, 0 0 18px 4px #5fe3d066;
+  animation-name: douse;
 }
 
-@keyframes ripple-out {
+@keyframes ignite {
   from { transform: scale(0.3) rotate(0deg); opacity: 1; }
   to { transform: scale(4.2) rotate(45deg); opacity: 0; }
 }
 
-@keyframes ripple-in {
+@keyframes douse {
   from { transform: scale(4) rotate(45deg); opacity: 0.9; }
   to { transform: scale(0.4) rotate(0deg); opacity: 0; }
+}
+
+/* A persistent marker for each fire still burning, so the player can see
+   what they have lit even before the video catches up. */
+.fire-marker {
+  position: absolute;
+  translate: -50% -50%;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+  z-index: 2;
+  border: 2px solid #000;
+  background: radial-gradient(circle, #fff3b0, #ff7a18 45%, #ff2d00 75%);
+  box-shadow: 0 0 20px 6px #ff6a0070;
+  animation: flicker 0.45s steps(3, end) infinite alternate;
+}
+
+@keyframes flicker {
+  from { transform: scale(0.85) rotate(0deg); opacity: 0.85; }
+  to { transform: scale(1.15) rotate(12deg); opacity: 1; }
 }
 
 /* Corner brackets. */
@@ -316,7 +340,8 @@ h3 {
 
 @media (prefers-reduced-motion: reduce) {
   .crosshair-ring,
-  .ripple {
+  .ripple,
+  .fire-marker {
     animation: none;
   }
 }

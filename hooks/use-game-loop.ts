@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
-  ageEvents,
   describePose,
+  douseAt,
+  igniteAt,
   initialPose,
   integrate,
-  recordEvent,
   type CameraPose,
-  type WorldEvent,
+  type Fire,
 } from "@/lib/game-camera";
 import {
   composeFromLexicon,
@@ -19,7 +19,7 @@ import {
   type ActionLexicon,
   type DirectorContext,
 } from "@/lib/game-director";
-import type { GameInputState } from "@/lib/game-input";
+import { describeZone, type GameInputState } from "@/lib/game-input";
 
 /**
  * Orbis emits a chunk roughly every 1.8s and applies whatever prompt it holds
@@ -64,8 +64,10 @@ export type GameLoopTelemetry = {
   queued: boolean;
   /** Human-readable camera pose, for the HUD. */
   pose: string;
-  /** Interactions still remembered. */
+  /** Fires still burning. */
   eventCount: number;
+  /** Where those fires are, so the viewport can mark them. */
+  fires: { x: number; y: number; id: number }[];
 };
 
 type GameLoopOptions = {
@@ -97,8 +99,10 @@ export function useGameLoop({
 
   /** Accumulated camera pose — the thing that makes WASD mean travel. */
   const poseRef = useRef<CameraPose>(initialPose());
-  /** What the player has disturbed, so effects persist past one chunk. */
-  const eventsRef = useRef<WorldEvent[]>([]);
+  /** Fires the player has lit. They persist until doused, not on a timer. */
+  const firesRef = useRef<Fire[]>([]);
+  /** Zone doused this send, shown going out exactly once. */
+  const dousedRef = useRef<string | undefined>(undefined);
   const chunkRef = useRef(0);
 
   const cacheRef = useRef(new Map<string, string>());
@@ -120,13 +124,21 @@ export function useGameLoop({
     queued: false,
     pose: "",
     eventCount: 0,
+    fires: [],
   });
+
+  /** Fire positions for the HUD, keyed stably by when each was lit. */
+  const firePoints = useCallback(
+    () => firesRef.current.map((fire) => ({ x: fire.x, y: fire.y, id: fire.litAt })),
+    [],
+  );
 
   const contextNow = useCallback(
     (input: GameInputState): DirectorContext => ({
       input,
       pose: poseRef.current,
-      events: eventsRef.current,
+      fires: firesRef.current,
+      dousedZone: dousedRef.current,
       chunk: chunkRef.current,
     }),
     [],
@@ -183,10 +195,20 @@ export function useGameLoop({
     const input = readState();
     const hasClick = input.clicks.length > 0;
 
-    // Fold a click into world memory before building the prompt, so it reads as
-    // happening now rather than one chunk late.
-    if (hasClick) {
-      eventsRef.current = recordEvent(eventsRef.current, input, chunkRef.current);
+    // Apply the click to the world before building the prompt, so ignition
+    // reads as happening now rather than one chunk late.
+    const click = input.clicks[input.clicks.length - 1];
+    if (click) {
+      if (click.kind === "primary") {
+        dousedRef.current = undefined;
+        firesRef.current = igniteAt(firesRef.current, click, chunkRef.current);
+      } else {
+        const before = firesRef.current.length;
+        firesRef.current = douseAt(firesRef.current, click);
+        // Only announce a douse that actually put something out.
+        dousedRef.current =
+          firesRef.current.length < before ? describeZone(click) : undefined;
+      }
     }
 
     const context = contextNow(input);
@@ -197,7 +219,7 @@ export function useGameLoop({
     // camera move coasts to a halt — and the pose bucket saturates after a few
     // seconds of held input, which used to stop the sends entirely. Dedupe only
     // applies when the player is still.
-    const moving = input.actions.size > 0;
+    const moving = input.actions.size > 0 || firesRef.current.length > 0;
     if (signature === lastSigRef.current && !hasClick && !moving) {
       warmDirector(signature, context);
       return;
@@ -227,12 +249,16 @@ export function useGameLoop({
       sentCount: current.sentCount + 1,
       queued: true,
       pose: describePose(poseRef.current),
-      eventCount: eventsRef.current.length,
+      eventCount: firesRef.current.length,
+      fires: firePoints(),
     }));
+    // The douse is a one-shot beat; clear it once it has been described.
+    dousedRef.current = undefined;
   }, [
     active,
     consumeClicks,
     contextNow,
+    firePoints,
     lexicon,
     readState,
     steerTo,
@@ -283,13 +309,13 @@ export function useGameLoop({
 
     lastBoundaryRef.current = performance.now();
     chunkRef.current += 1;
-    eventsRef.current = ageEvents(eventsRef.current, chunkRef.current);
     // Whatever was queued has now been applied.
     setTelemetry((current) => ({
       ...current,
       chunkProgress: 0,
       queued: false,
-      eventCount: eventsRef.current.length,
+      eventCount: firesRef.current.length,
+      fires: firePoints(),
     }));
 
     // Re-evaluate immediately: the pose has moved on even if the keys have not.
@@ -317,7 +343,8 @@ export function useGameLoop({
     lastSigRef.current = "";
     lastSendAtRef.current = 0;
     poseRef.current = initialPose();
-    eventsRef.current = [];
+    firesRef.current = [];
+    dousedRef.current = undefined;
     chunkRef.current = 0;
     cacheRef.current.clear();
     pendingRef.current.clear();
@@ -331,6 +358,7 @@ export function useGameLoop({
       queued: false,
       pose: "",
       eventCount: 0,
+      fires: [],
     });
   }, [active]);
 

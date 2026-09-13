@@ -190,6 +190,7 @@ function GameSession({ clearJwt }: { clearJwt: () => void }) {
             muted={session.muted}
             paused={session.paused}
             status={session.status}
+            fires={telemetry.fires}
             overlay={
               session.runStarted ? null : (
                 <WorldLoader

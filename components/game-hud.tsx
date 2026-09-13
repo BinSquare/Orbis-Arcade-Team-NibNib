@@ -76,7 +76,7 @@ export function ActionReadout({
           {telemetry.eventCount > 0 && (
             <span className="text-accent">
               {" "}
-              · {telemetry.eventCount} disturbed
+              · {telemetry.eventCount} burning
             </span>
           )}
         </span>
@@ -157,7 +157,7 @@ export function WorldPanel({
               {lexicon.forward}
               <br />
               <span className="font-pixel text-primary">CLICK </span>
-              {lexicon.interact.replaceAll("{zone}", "target")}
+              {lexicon.ignite.replaceAll("{zone}", "target")}
             </p>
           </CardContent>
         </>

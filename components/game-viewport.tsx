@@ -14,6 +14,8 @@ type GameViewportProps = {
   muted: boolean;
   paused: boolean;
   status: string;
+  /** Fires currently burning, drawn as persistent markers. */
+  fires?: { x: number; y: number; id: number }[];
   /** Shown over the surface before a world is running. */
   overlay?: ReactNode;
 };
@@ -32,6 +34,7 @@ export function GameViewport({
   muted,
   paused,
   status,
+  fires = [],
   overlay,
 }: GameViewportProps) {
   const { pointer, ripples } = snapshot;
@@ -66,6 +69,16 @@ export function GameViewport({
             <span className="crosshair-label">{describeZone(pointer)}</span>
           </div>
         )}
+
+        {live &&
+          fires.map((fire) => (
+            <span
+              key={`fire-${fire.id}`}
+              className="fire-marker"
+              style={{ left: `${fire.x * 100}%`, top: `${fire.y * 100}%` }}
+              aria-hidden
+            />
+          ))}
 
         {live &&
           ripples.map((click) => (
@@ -108,7 +121,7 @@ export function GameViewport({
         </Badge>
         <span className="font-pixel text-[0.65rem] text-muted-foreground">
           {live
-            ? "MOVE TO AIM · LEFT CLICK ACTS · RIGHT CLICK CALMS"
+            ? "MOVE TO AIM · LEFT CLICK IGNITES · RIGHT CLICK DOUSES"
             : "LOAD A WORLD TO BEGIN"}
         </span>
       </div>

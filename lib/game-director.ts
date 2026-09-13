@@ -17,11 +17,13 @@
  */
 
 import {
-  describeEvents,
+  describeDouse,
+  describeFires,
   describePose,
+  fireSignature,
   poseBucket,
   type CameraPose,
-  type WorldEvent,
+  type Fire,
 } from "@/lib/game-camera";
 import {
   describePrecise,
@@ -34,8 +36,11 @@ import {
 export type DirectorContext = {
   input: GameInputState;
   pose: CameraPose;
-  events: WorldEvent[];
-  /** Chunk index, used to tell a fresh interaction from a lingering one. */
+  /** Fires currently burning, lit by clicks and put out by right clicks. */
+  fires: Fire[];
+  /** Set on the chunk a douse happens, so it can be shown going out. */
+  dousedZone?: string;
+  /** Chunk index, which drives how fierce each fire reads. */
   chunk: number;
 };
 
@@ -51,8 +56,8 @@ export const LEXICON_FIELDS = [
   "descend",
   "idle",
   "sprint",
-  "interact",
-  "calm",
+  "ignite",
+  "douse",
   "anchor",
 ] as const;
 
@@ -81,10 +86,10 @@ export type ActionLexicon = {
   idle: string;
   /** Adverbial phrase applied when sprinting, e.g. "fast and urgent". */
   sprint: string;
-  /** Left click. Must contain {zone}. */
-  interact: string;
-  /** Right click. Must contain {zone}. */
-  calm: string;
+  /** Left click: what catches fire at {zone}. Must contain {zone}. */
+  ignite: string;
+  /** Right click: the fire going out at {zone}. Must contain {zone}. */
+  douse: string;
   /** Short re-anchor, <= 25 words, repeated every prompt to prevent drift. */
   anchor: string;
 };
@@ -106,9 +111,9 @@ export function fallbackLexicon(world: string): ActionLexicon {
     descend: "down toward the ground and what rests on it",
     idle: "the scene keeps moving on its own",
     sprint: "fast and urgent",
-    interact:
-      "whatever sits at the {zone} reacts, stirs, and moves in response",
-    calm: "whatever sits at the {zone} settles, backs away, and goes still",
+    ignite:
+      "flames erupt at the {zone} and catch fast, smoke rising in a bright column",
+    douse: "the flames at the {zone} collapse into steam and blackened remains",
     anchor: world.split(/\s+/).slice(0, 25).join(" "),
   };
 }
@@ -124,7 +129,7 @@ export function fallbackLexicon(world: string): ActionLexicon {
  * new correctly invalidates it.
  */
 export function signatureOf(context: DirectorContext): string {
-  const { input, pose, events } = context;
+  const { input, pose, fires } = context;
 
   const actions = MOVEMENT_ACTIONS.filter((action) => input.actions.has(action));
   if (input.actions.has("sprint")) actions.push("sprint");
@@ -132,14 +137,12 @@ export function signatureOf(context: DirectorContext): string {
   const aim = input.pointer ? describeZone(input.pointer) : "none";
   const click = input.clicks[input.clicks.length - 1];
   const act = click ? `${click.kind}@${describeZone(click)}` : "none";
-  const memory = events.map((event) => `${event.kind[0]}${event.zone[0]}`).join("");
-
-  return `${actions.join("+") || "idle"}|${aim}|${act}|${poseBucket(pose)}|${memory}`;
+  return `${actions.join("+") || "idle"}|${aim}|${act}|${poseBucket(pose)}|${fireSignature(fires, context.chunk)}`;
 }
 
 /** Plain-English situation report handed to the live director. */
 export function describeSituation(context: DirectorContext): string {
-  const { input, pose, events, chunk } = context;
+  const { input, pose, fires, dousedZone, chunk } = context;
   const parts: string[] = [];
 
   const moving = MOVEMENT_ACTIONS.filter((action) => input.actions.has(action));
@@ -158,14 +161,13 @@ export function describeSituation(context: DirectorContext): string {
     parts.push(`Attention is on the ${describeZone(input.pointer)}.`);
   }
 
-  const memory = describeEvents(events, chunk);
-  if (memory) parts.push(memory);
+  const fire = describeFires(fires, chunk);
+  if (fire) parts.push(fire);
+  if (dousedZone) parts.push(describeDouse(dousedZone));
 
   const click = input.clicks[input.clicks.length - 1];
-  if (click) {
-    parts.push(
-      `The player just ${click.kind === "primary" ? "acted on" : "calmed"} the point ${describePrecise(click)}.`,
-    );
+  if (click && click.kind === "primary") {
+    parts.push(`A fire has just been lit at ${describePrecise(click)}.`);
   }
 
   return parts.join(" ");
@@ -223,7 +225,7 @@ export function composeFromLexicon(
   lexicon: ActionLexicon,
   context: DirectorContext,
 ): string {
-  const { input, pose, events, chunk } = context;
+  const { input, pose, fires, dousedZone, chunk } = context;
   const moving = MOVEMENT_ACTIONS.filter((action) => input.actions.has(action));
   const fast = input.actions.has("sprint");
   const sentences: string[] = [];
@@ -239,19 +241,26 @@ export function composeFromLexicon(
   } else {
     sentences.push("The camera comes to rest and holds still.");
     sentences.push(sentence(lexicon.idle));
-    // Only re-anchor when nothing is moving; this is when drift can creep in.
-    sentences.push(sentence(lexicon.anchor));
+    // Re-anchor only when the frame is otherwise static. A burning fire is a
+    // strong enough subject on its own, and the anchor would just dilute it.
+    if (!fires.length) sentences.push(sentence(lexicon.anchor));
   }
 
+  // A brand-new fire gets the lexicon's vivid ignition line; everything still
+  // burning is summarised after it so the frame stays consistent.
   const click = input.clicks[input.clicks.length - 1];
-  if (click) {
-    const template = click.kind === "primary" ? lexicon.interact : lexicon.calm;
-    sentences.push(sentence(template.replaceAll("{zone}", describeZone(click))));
+  const justLit = click?.kind === "primary";
+  if (justLit && click) {
+    sentences.push(
+      sentence(lexicon.ignite.replaceAll("{zone}", describeZone(click))),
+    );
+  }
+  if (dousedZone) {
+    sentences.push(sentence(lexicon.douse.replaceAll("{zone}", dousedZone)));
   }
 
-  const memory = describeEvents(events, chunk);
-  // The freshest click is already spoken for by the lexicon line above.
-  if (memory && !click) sentences.push(memory);
+  const fire = describeFires(justLit ? fires.slice(0, -1) : fires, chunk);
+  if (fire) sentences.push(fire);
 
   sentences.push("Continuous shot, no cuts.");
   return sentences.join(" ");
