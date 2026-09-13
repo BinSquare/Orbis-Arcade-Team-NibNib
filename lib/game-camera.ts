@@ -15,15 +15,20 @@
 import type { ClickKind, GameAction, GameInputState } from "@/lib/game-input";
 import { describeZone } from "@/lib/game-input";
 
-/** Abstract units per second. Tuned so a couple of seconds of W reads as real travel. */
-const MOVE_SPEED = 1.0;
-const RISE_SPEED = 0.7;
-const TURN_SPEED = 32; // degrees per second
+/**
+ * Abstract units per second, scaled against the limits below so that ONE chunk
+ * (~1.8s) of held input visibly changes the pose language. At 1.0 against a
+ * limit of 12 a full chunk of W moved 0.15 of the scale, which read as the same
+ * sentence twice and made the controls feel dead.
+ */
+const MOVE_SPEED = 2.4;
+const RISE_SPEED = 1.6;
+const TURN_SPEED = 45; // degrees per second
 const SPRINT_MULTIPLIER = 2.2;
 
 /** Beyond this the language stops differentiating, so stop accumulating. */
-const MAX_TRAVEL = 12;
-const MAX_ELEVATION = 6;
+const MAX_TRAVEL = 9;
+const MAX_ELEVATION = 4;
 
 export type CameraPose = {
   /** Signed distance along the view axis. Positive is forward. */

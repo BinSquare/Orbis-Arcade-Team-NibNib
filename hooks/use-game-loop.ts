@@ -22,15 +22,27 @@ import {
 import type { GameInputState } from "@/lib/game-input";
 
 /**
- * Orbis emits a chunk roughly every 1.8s and applies steering at the next
- * boundary. If `chunk_complete` ever stalls we still want the controls to feel
- * alive, so a timer of the same order acts as a floor.
+ * Orbis emits a chunk roughly every 1.8s and applies whatever prompt it holds
+ * at the boundary.
+ *
+ * The loop therefore sends the moment input changes rather than waiting for a
+ * boundary of its own. Waiting cost up to a full chunk before the prompt was
+ * even queued, and Orbis then took another chunk to apply it — about 3.6s from
+ * keypress to picture. Sending immediately means the newest input is already
+ * queued when the boundary arrives, roughly halving that.
  */
 const CHUNK_PERIOD_MS = 1_800;
 const FALLBACK_TICK_MS = 2_400;
 
-/** Camera integration rate. Fine enough to feel continuous, cheap enough to ignore. */
-const POSE_TICK_MS = 100;
+/** Input sampling and camera integration rate. */
+const INPUT_POLL_MS = 80;
+
+/**
+ * Floor between sends. Orbis only reads the prompt at a boundary, so more than
+ * a few updates per chunk is wasted traffic — but a few is what guarantees the
+ * latest input wins.
+ */
+const MIN_SEND_INTERVAL_MS = 350;
 
 /** Cap the director cache so a long session cannot grow it without bound. */
 const MAX_CACHED_DIRECTIONS = 60;
@@ -46,9 +58,9 @@ export type GameLoopTelemetry = {
   sentCount: number;
   /** Situations the model has written bespoke prompts for. */
   cachedCount: number;
-  /** 0-1 progress toward the next steering opportunity. */
+  /** 0-1 progress toward the boundary where the queued prompt takes effect. */
   chunkProgress: number;
-  /** True while the situation differs from what was last sent. */
+  /** True while something is sent-but-not-yet-applied, or still to be sent. */
   queued: boolean;
   /** Human-readable camera pose, for the HUD. */
   pose: string;
@@ -79,6 +91,7 @@ export function useGameLoop({
   steerTo,
 }: GameLoopOptions): GameLoopTelemetry {
   const lastSigRef = useRef("");
+  const lastSendAtRef = useRef(0);
   const lastBoundaryRef = useRef(performance.now());
   const inFlightRef = useRef(false);
 
@@ -90,6 +103,13 @@ export function useGameLoop({
 
   const cacheRef = useRef(new Map<string, string>());
   const pendingRef = useRef(new Set<string>());
+  /**
+   * Signatures the director failed on. Without this the input poll would retry
+   * a failing signature every tick — the old code only warmed once per chunk,
+   * so a failure was self-limiting; at 12.5Hz it would hammer the API. A failed
+   * signature simply keeps using the composed prompt for the rest of the run.
+   */
+  const failedRef = useRef(new Set<string>());
 
   const [telemetry, setTelemetry] = useState<GameLoopTelemetry>({
     lastSent: "",
@@ -113,24 +133,6 @@ export function useGameLoop({
   );
 
   /* ---------------------------------------------------------------- */
-  /* Camera integration                                                */
-  /* ---------------------------------------------------------------- */
-
-  useEffect(() => {
-    if (!active) return;
-    let last = performance.now();
-    const timer = setInterval(() => {
-      const now = performance.now();
-      const delta = (now - last) / 1000;
-      last = now;
-      const { actions } = readState();
-      if (!actions.size) return;
-      poseRef.current = integrate(poseRef.current, actions, delta);
-    }, POSE_TICK_MS);
-    return () => clearInterval(timer);
-  }, [active, readState]);
-
-  /* ---------------------------------------------------------------- */
   /* Director warming                                                  */
   /* ---------------------------------------------------------------- */
 
@@ -139,12 +141,16 @@ export function useGameLoop({
       if (!useDirector) return;
       if (cacheRef.current.has(signature)) return;
       if (pendingRef.current.has(signature)) return;
+      if (failedRef.current.has(signature)) return;
       if (pendingRef.current.size >= MAX_INFLIGHT) return;
 
       pendingRef.current.add(signature);
       void requestDirection(world, describeSituation(context))
         .then((prompt) => {
-          if (!prompt) return;
+          if (!prompt) {
+            failedRef.current.add(signature);
+            return;
+          }
           const cache = cacheRef.current;
           // Evict oldest-first; Map preserves insertion order.
           if (cache.size >= MAX_CACHED_DIRECTIONS) {
@@ -163,27 +169,31 @@ export function useGameLoop({
   /* Steering                                                          */
   /* ---------------------------------------------------------------- */
 
-  const onBoundary = useCallback(async () => {
+  /**
+   * Sends the current situation if it differs from what Orbis already holds.
+   * Called from the input poll (so a keypress goes out at once), from every
+   * chunk boundary, and from the stall fallback.
+   */
+  const steerNow = useCallback(async () => {
     if (!active || !lexicon || inFlightRef.current) return;
 
-    lastBoundaryRef.current = performance.now();
-    chunkRef.current += 1;
+    const now = performance.now();
+    if (now - lastSendAtRef.current < MIN_SEND_INTERVAL_MS) return;
 
     const input = readState();
     const hasClick = input.clicks.length > 0;
 
-    // Fold this chunk's click into world memory before building the prompt, so
-    // the interaction is described as happening now rather than next chunk.
+    // Fold a click into world memory before building the prompt, so it reads as
+    // happening now rather than one chunk late.
     if (hasClick) {
       eventsRef.current = recordEvent(eventsRef.current, input, chunkRef.current);
     }
-    eventsRef.current = ageEvents(eventsRef.current, chunkRef.current);
 
     const context = contextNow(input);
     const signature = signatureOf(context);
 
+    // A click is one-shot and must always go out; held keys dedupe.
     if (signature === lastSigRef.current && !hasClick) {
-      setTelemetry((current) => ({ ...current, queued: false }));
       warmDirector(signature, context);
       return;
     }
@@ -192,8 +202,9 @@ export function useGameLoop({
     const prompt = directed ?? composeFromLexicon(lexicon, context);
 
     inFlightRef.current = true;
-    // Clear first: a click that arrives mid-send belongs to the next boundary,
-    // not this one, and must not be silently dropped.
+    lastSendAtRef.current = now;
+    // Clear first: a click arriving mid-send belongs to the next send, not this
+    // one, and must not be silently dropped.
     consumeClicks();
 
     const sent = await steerTo(prompt);
@@ -209,8 +220,7 @@ export function useGameLoop({
       lastSent: prompt,
       lastSource: directed ? "director" : "composed",
       sentCount: current.sentCount + 1,
-      chunkProgress: 0,
-      queued: false,
+      queued: true,
       pose: describePose(poseRef.current),
       eventCount: eventsRef.current.length,
     }));
@@ -224,12 +234,63 @@ export function useGameLoop({
     warmDirector,
   ]);
 
-  // Real boundary: driven by the model's own chunk_complete events.
+  /* ---------------------------------------------------------------- */
+  /* Input poll: integrate the camera, then steer if anything changed  */
+  /* ---------------------------------------------------------------- */
+
+  useEffect(() => {
+    if (!active) return;
+    let last = performance.now();
+    const timer = setInterval(() => {
+      const now = performance.now();
+      const delta = (now - last) / 1000;
+      last = now;
+
+      const input = readState();
+      if (input.actions.size) {
+        poseRef.current = integrate(poseRef.current, input.actions, delta);
+      }
+
+      // Cheap guard: only pay for signature building when something could send.
+      if (now - lastSendAtRef.current >= MIN_SEND_INTERVAL_MS) {
+        void steerNow();
+      }
+
+      setTelemetry((current) => {
+        const progress = Math.min(
+          1,
+          (now - lastBoundaryRef.current) / CHUNK_PERIOD_MS,
+        );
+        return current.chunkProgress === progress
+          ? current
+          : { ...current, chunkProgress: progress };
+      });
+    }, INPUT_POLL_MS);
+    return () => clearInterval(timer);
+  }, [active, readState, steerNow]);
+
+  /* ---------------------------------------------------------------- */
+  /* Chunk boundaries: the real clock                                  */
+  /* ---------------------------------------------------------------- */
+
   useEffect(() => {
     if (!active || chunkTick === 0) return;
-    void onBoundary();
-    // `onBoundary` is intentionally excluded — this must fire once per chunk,
-    // not again whenever a dependency of the callback changes identity.
+
+    lastBoundaryRef.current = performance.now();
+    chunkRef.current += 1;
+    eventsRef.current = ageEvents(eventsRef.current, chunkRef.current);
+    // Whatever was queued has now been applied.
+    setTelemetry((current) => ({
+      ...current,
+      chunkProgress: 0,
+      queued: false,
+      eventCount: eventsRef.current.length,
+    }));
+
+    // Re-evaluate immediately: the pose has moved on even if the keys have not.
+    void steerNow();
+    // `steerNow` is intentionally excluded — this must fire once per chunk, not
+    // again whenever a dependency of the callback changes identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, chunkTick]);
 
@@ -238,45 +299,24 @@ export function useGameLoop({
     if (!active) return;
     const timer = setInterval(() => {
       if (performance.now() - lastBoundaryRef.current < FALLBACK_TICK_MS) return;
-      void onBoundary();
+      lastBoundaryRef.current = performance.now();
+      chunkRef.current += 1;
+      void steerNow();
     }, FALLBACK_TICK_MS / 2);
     return () => clearInterval(timer);
-  }, [active, onBoundary]);
-
-  // Progress toward the next boundary, plus the live pose readout.
-  useEffect(() => {
-    if (!active) {
-      setTelemetry((current) => ({
-        ...current,
-        chunkProgress: 0,
-        queued: false,
-      }));
-      return;
-    }
-    const timer = setInterval(() => {
-      const elapsed = performance.now() - lastBoundaryRef.current;
-      const input = readState();
-      setTelemetry((current) => ({
-        ...current,
-        chunkProgress: Math.min(1, elapsed / CHUNK_PERIOD_MS),
-        queued:
-          signatureOf(contextNow(input)) !== lastSigRef.current ||
-          input.clicks.length > 0,
-        pose: describePose(poseRef.current),
-      }));
-    }, 120);
-    return () => clearInterval(timer);
-  }, [active, contextNow, readState]);
+  }, [active, steerNow]);
 
   // A fresh run starts from the opening vantage with no memory.
   useEffect(() => {
     if (active) return;
     lastSigRef.current = "";
+    lastSendAtRef.current = 0;
     poseRef.current = initialPose();
     eventsRef.current = [];
     chunkRef.current = 0;
     cacheRef.current.clear();
     pendingRef.current.clear();
+    failedRef.current.clear();
     setTelemetry({
       lastSent: "",
       lastSource: "none",

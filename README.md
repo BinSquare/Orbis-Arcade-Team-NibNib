@@ -99,9 +99,22 @@ Two more structural choices:
 - **A click is never deduped.** Held keys are — re-sending identical text just
   spends a boundary — but a click is a one-shot event and always goes out.
 
-Orbis emits a chunk about every 1.8s, so that is the real control latency. The
-`NEXT` meter shows time to the next steering opportunity; `QUEUED` means your
-input differs from what was last sent.
+### Latency
+
+Orbis applies whatever prompt it holds at each ~1.8s chunk boundary, so that
+boundary is the floor. The loop sends the moment input changes rather than
+waiting for a boundary of its own — waiting cost a full chunk before the prompt
+was even queued, and Orbis then took another to apply it, roughly 3.6s from
+keypress to picture. Sending immediately (rate-limited to one per 350ms) means
+the newest input is already queued when the boundary arrives.
+
+Camera speeds are scaled so that one chunk of held input visibly changes the
+pose language. At the original 1.0 units/s against a limit of 12, a full chunk
+of `W` moved 0.15 of the scale and produced the same sentence twice, which read
+as the controls doing nothing.
+
+The `NEXT` meter shows time to the boundary where your queued input takes
+effect; `QUEUED` means something is waiting on it.
 
 ## The AI layers
 
