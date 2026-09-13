@@ -61,11 +61,18 @@ past *in this scene* — "past the retriever's feathery tail and lichen-mottled
 foreground stone". Composing from it is instant, so every boundary has
 something grounded to send.
 
-The camera verb itself is **not** left to the model: `CAMERA_MOVES` in
-`lib/game-director.ts` maps each control to film grammar (`dolly in`,
-`truck left`, `crane up`, `pan right`) and that leads the prompt. An early
-version had the model describe what the shot would contain, which reads as a
-static state and rendered as one — the camera never actually moved.
+The viewpoint is **a person on foot**, not a camera rig. `STEPS` in
+`lib/game-director.ts` maps each control to an embodied movement — *walking
+forward*, *sidestepping left*, *crouching down low*, and running variants for
+Shift — and every prompt opens `First-person POV, …`. That framing is far
+better represented in video training data than camera language, and it brings
+eye level, head-bob and footfall with it. Gait wording is only added for actual
+locomotion; a crouch or a turn on the spot has no footstep sway.
+
+Two earlier versions failed here: describing what the shot would *contain*
+(a static state, which rendered as one), then film-grammar camera terms
+(`dolly in`, `crane up`), which moved the frame but left the world feeling
+uninhabited.
 
 **2. The director** (`/api/direct`, async, per input combination). Input state
 is reduced to a signature — held keys, aim bucketed to a 3x3 zone, last click.
@@ -158,9 +165,15 @@ When you drop an image, two calls run before you can enter:
 2. `POST /api/lexicon` — the model writes the movement lexicon for that image,
    as strict-schema JSON. ~8s.
 
-Measured with `gpt-5.6-luna`: world ~4s, lexicon ~8s (both one-time, at image
-load), director ~3-5s (async, never blocking). Note the GPT-5.6 family rejects
-any `temperature` but its default, so the OpenAI path never sends one.
+Measured with `gpt-5.6-luna`: world ~4s, lexicon ~8-11s (both one-time, at
+image load), director ~1.8s (async, never blocking).
+
+Two quirks of the GPT-5.6 family are handled in `lib/ai.ts`. It rejects any
+`temperature` but its default, so the OpenAI path never sends one. It also
+spends reasoning tokens out of `max_completion_tokens` — at a 512 budget a long
+reasoning pass consumed the lot and returned empty content, surfacing as an
+intermittent 502. `reasoning_effort: "none"` fixes that outright and is also the
+fastest setting; a model that rejects the parameter is retried without it.
 
 With no key, all three fall back: the world becomes a generic description built
 from the filename, the lexicon becomes generic camera language, and the director

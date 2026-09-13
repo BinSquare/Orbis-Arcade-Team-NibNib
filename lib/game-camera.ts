@@ -99,9 +99,9 @@ const TRAVEL_WORDS = {
 } as const;
 
 /**
- * Describes the pose as displacement from the opening view. Absolute
- * coordinates mean nothing to a video model, but "well past where it started,
- * turned about 45 degrees left" is something it can hold onto.
+ * Describes how far the person has walked from where they started. Absolute
+ * coordinates mean nothing to a video model, but "well in from where the walk
+ * began, turned about 45 degrees left" is something it can hold onto.
  */
 export function describePose(pose: CameraPose): string {
   const parts: string[] = [];
@@ -110,15 +110,15 @@ export function describePose(pose: CameraPose): string {
   if (travel !== "none") {
     parts.push(
       pose.advance > 0
-        ? `${TRAVEL_WORDS[travel]} deeper into the scene than the opening view`
-        : `${TRAVEL_WORDS[travel]} back from the opening view`,
+        ? `${TRAVEL_WORDS[travel]} further in than where the walk began`
+        : `${TRAVEL_WORDS[travel]} back from where the walk began`,
     );
   }
 
   const lateral = magnitude(pose.strafe, MAX_TRAVEL);
   if (lateral !== "none") {
     parts.push(
-      `${TRAVEL_WORDS[lateral]} to the ${pose.strafe > 0 ? "right" : "left"} of where it started`,
+      `${TRAVEL_WORDS[lateral]} to the ${pose.strafe > 0 ? "right" : "left"} of the starting point`,
     );
   }
 
@@ -126,8 +126,8 @@ export function describePose(pose: CameraPose): string {
   if (height !== "none") {
     parts.push(
       pose.elevation > 0
-        ? `raised ${height === "far" ? "high" : "somewhat"} above the original eye level`
-        : `lowered ${height === "far" ? "close to the ground" : "somewhat"}`,
+        ? `${height === "far" ? "up high" : "raised"} above the original eye level`
+        : `${height === "far" ? "crouched near the ground" : "lowered"}`,
     );
   }
 
@@ -140,10 +140,12 @@ export function describePose(pose: CameraPose): string {
   }
 
   if (!parts.length) {
-    return "The camera is at its original vantage, exactly as the scene opened.";
+    return "Still standing where the scene opened, facing the same way.";
   }
 
-  return `The camera now sits ${parts.join(", ")}.`;
+  // Two clauses is the most that reads cleanly; more buries the movement the
+  // prompt is actually about. `parts` is already in significance order.
+  return `The viewpoint is now ${parts.slice(0, 2).join(", ")}.`;
 }
 
 /**

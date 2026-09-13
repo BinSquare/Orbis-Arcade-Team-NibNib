@@ -13,6 +13,15 @@ import OpenAI from "openai";
 
 export type AiProvider = "openai" | "gemini";
 
+/**
+ * The GPT-5.6 family spends reasoning tokens out of `max_completion_tokens`.
+ * At a 512 budget a long reasoning pass consumed the lot and returned empty
+ * content, which surfaced as an intermittent 502. Writing a video prompt needs
+ * no deep reasoning, so this is switched off: 0 reasoning tokens, the fastest
+ * responses of any setting, and no way to starve the output.
+ */
+const REASONING_EFFORT = process.env.OPENAI_REASONING_EFFORT || "none";
+
 /** Model ids are overridable so a key with limited access can still work. */
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.6-luna";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash";
@@ -40,6 +49,29 @@ export function providerModel(provider: AiProvider): string {
 /** The error every route returns when no usable key is configured. */
 export const NO_KEY_ERROR =
   "No AI key configured. Set OPENAI_API_KEY or GEMINI_API_KEY in .env.local.";
+
+/**
+ * Sends a chat completion, retrying without `reasoning_effort` if the model
+ * rejects it — not every model supports the parameter, and a custom
+ * OPENAI_MODEL should not hard-fail on it.
+ */
+async function createCompletion(
+  client: OpenAI,
+  body: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
+): Promise<string> {
+  try {
+    const response = await client.chat.completions.create({
+      ...body,
+      reasoning_effort: REASONING_EFFORT as "none" | "low" | "medium" | "high",
+    });
+    return response.choices[0]?.message?.content?.trim() || "";
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : String(caught);
+    if (!message.includes("reasoning_effort")) throw caught;
+    const response = await client.chat.completions.create(body);
+    return response.choices[0]?.message?.content?.trim() || "";
+  }
+}
 
 export type AiImage = {
   mimeType: string;
@@ -76,7 +108,7 @@ async function openAiText({
   system,
   user,
   image,
-  maxTokens = 512,
+  maxTokens = 1_200,
 }: GenerateOptions): Promise<string> {
   const client = new OpenAI({ apiKey: keyFor("OPENAI_API_KEY")! });
 
@@ -90,7 +122,7 @@ async function openAiText({
     });
   }
 
-  const response = await client.chat.completions.create({
+  return createCompletion(client, {
     model: OPENAI_MODEL,
     messages: [
       { role: "system", content: system },
@@ -98,8 +130,6 @@ async function openAiText({
     ],
     max_completion_tokens: maxTokens,
   });
-
-  return response.choices[0]?.message?.content?.trim() || "";
 }
 
 async function geminiText({
@@ -171,7 +201,7 @@ async function openAiStringMap({
   image,
   fields,
   schemaName,
-  maxTokens = 2_048,
+  maxTokens = 3_000,
 }: GenerateOptions & {
   fields: readonly string[];
   schemaName: string;
@@ -188,7 +218,7 @@ async function openAiStringMap({
     });
   }
 
-  const response = await client.chat.completions.create({
+  return createCompletion(client, {
     model: OPENAI_MODEL,
     messages: [
       { role: "system", content: system },
@@ -212,8 +242,6 @@ async function openAiStringMap({
       },
     },
   });
-
-  return response.choices[0]?.message?.content?.trim() || "";
 }
 
 async function geminiStringMap({

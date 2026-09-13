@@ -178,23 +178,33 @@ export function describeSituation(context: DirectorContext): string {
 /* ------------------------------------------------------------------ */
 
 /**
- * Film-grammar camera terms, hardcoded rather than left to the lexicon.
+ * The viewpoint is a person walking through the place, not a camera rig.
  *
- * A video model reacts to "dolly in" far more strongly than to a description
- * of what the shot would contain. The first version asked the model to write
- * scenery ("the retriever's mouth fills the view"), which reads as a static
- * state and rendered as one — the camera never actually moved.
+ * "Walking forward" is a far more common thing for a video model to have seen
+ * than "dolly in", and it carries embodiment with it — eye level, head-bob,
+ * footfall. An earlier version used film-grammar camera terms, which moved the
+ * frame but left the world feeling uninhabited.
+ *
+ * Each entry is [normal, running].
  */
-const CAMERA_MOVES: Record<string, string> = {
-  forward: "dolly in",
-  back: "dolly out",
-  strafeLeft: "truck left",
-  strafeRight: "truck right",
-  turnLeft: "pan left",
-  turnRight: "pan right",
-  rise: "crane up",
-  descend: "crane down",
+const STEPS: Record<string, [string, string]> = {
+  forward: ["walking forward", "running forward"],
+  back: ["backing away", "hurrying backwards"],
+  strafeLeft: ["sidestepping to the left", "darting to the left"],
+  strafeRight: ["sidestepping to the right", "darting to the right"],
+  turnLeft: ["turning to look left", "whipping around to the left"],
+  turnRight: ["turning to look right", "whipping around to the right"],
+  rise: ["straightening up to see further", "surging up for a better view"],
+  descend: ["crouching down low", "dropping low"],
 };
+
+/**
+ * Kept to a few words on purpose. A long POV preamble repeated verbatim every
+ * chunk is exactly the unchanging boilerplate that made prompts 97% identical
+ * and the picture static — and a fixed "walking at eye level" also contradicts
+ * the prompt the moment the player crouches.
+ */
+const POV = "First-person POV";
 
 function joinClauses(clauses: string[]): string {
   if (clauses.length === 1) return clauses[0];
@@ -231,15 +241,25 @@ export function composeFromLexicon(
   const sentences: string[] = [];
 
   if (moving.length) {
-    // Lead with the bare camera instruction, stated imperatively.
-    const moves = moving.map((action) => CAMERA_MOVES[action]).join(" and ");
-    sentences.push(`${capitalize(fast ? `fast ${moves}` : moves)}, continuously.`);
+    // Lead with the body: who is moving and how, before anything else.
+    const steps = moving
+      .map((action) => STEPS[action][fast ? 1 : 0])
+      .join(" while ");
+    // Gait language only belongs with actual locomotion — a crouch or a turn
+    // on the spot has no footfall.
+    const onFoot = moving.some((action) =>
+      ["forward", "back", "strafeLeft", "strafeRight"].includes(action),
+    );
+    const gait = onFoot ? ", natural head-bob and footstep sway" : "";
+    sentences.push(`${POV}, ${steps}${gait}, continuously.`);
 
-    // One scenery clause for grounding — what the move carries us past.
+    // One scenery clause for grounding — what the walk carries us past.
     sentences.push(sentence(lexicon[moving[0]]));
     sentences.push(describePose(pose));
   } else {
-    sentences.push("The camera comes to rest and holds still.");
+    sentences.push(
+      `${POV}, standing still, only a slight natural sway.`,
+    );
     sentences.push(sentence(lexicon.idle));
     // Re-anchor only when the frame is otherwise static. A burning fire is a
     // strong enough subject on its own, and the anchor would just dilute it.
